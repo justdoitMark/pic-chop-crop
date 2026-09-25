@@ -1,0 +1,9 @@
+node_modules/
+src-tauri/target/
+dist/
+*.log
+test-results/
+playwright-report/
+
+# local session notes of the "remember" Claude plugin
+.remember/

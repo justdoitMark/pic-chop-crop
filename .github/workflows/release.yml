@@ -1,0 +1,63 @@
+name: release
+
+# Два способа собрать релиз:
+#   1. Тег:      git tag v1.1.0 && git push --tags
+#   2. Вручную:  вкладка Actions -> release -> "Run workflow", вписать версию
+#      (работает и из мобильного приложения GitHub, без git и без ПК)
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия релиза, например v1.1.0'
+        required: true
+        default: 'v1.2.0'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # actions-rs/toolchain заархивирован автором и ломается на свежих
+      # раннерах — dtolnay/rust-toolchain это поддерживаемая замена.
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Кэш ~/.cargo и target/: первая сборка ~10 минут, последующие заметно
+      # быстрее.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Версия берётся из tauri.conf.json, а не из тега — без этой проверки
+      # тег v1.3.0 мог бы выложить инсталлятор, собранный как 1.2.0.
+      - name: Check tag matches app version
+        run: node scripts/check-version.mjs ${{ inputs.version || github.ref_name }}
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Generate placeholder app icons
+        run: node scripts/generate-icons.mjs
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ inputs.version || github.ref_name }}
+          releaseName: Pic Chop Crop ${{ inputs.version || github.ref_name }}
+          releaseBody: |
+            Скачай файл `Pic.Chop.Crop_…_x64-setup.exe` ниже и запусти — установка обычная, "Далее -> Далее".
+
+            Windows покажет синее окно "Windows protected your PC" (приложение без цифровой подписи):
+            нажми **"Подробнее" -> "Выполнить в любом случае"**.
+          releaseDraft: false
+          prerelease: false

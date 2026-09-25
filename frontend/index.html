@@ -1,0 +1,1252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pic Chop Crop — локальный обрезчик изображений</title>
+<style>
+  /* Подложка вокруг фото — нейтральный графит: цветной фон искажает восприятие
+     цветов снимка. Фирменный тёмно-синий — только на элементах управления.
+     Голубой = геометрия (рамка, размеры, выбранное). Янтарный = результат
+     (кнопка «Сохранить», предупреждение о растяжении). */
+  :root{
+    --surround:#1B1C1F;
+    --chrome:rgba(14,24,40,.92); --chromeSolid:#0E1828; --pop:#122033;
+    --line:#26374F; --lineSoft:rgba(140,170,210,.14);
+    --text:#E8EDF3; --muted:#97A6B8;
+    --cyan:#4FD8E8; --cyanSoft:rgba(79,216,232,.14);
+    --amber:#F5A623; --amberSoft:rgba(245,166,35,.16);
+    --rose:#F2637A;
+    --dim:rgba(0,0,0,.58);
+    --sans:'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif;
+    --mono:'Cascadia Mono','Consolas',monospace;   /* только для пикселей */
+    --fs-s:12px; --fs-m:13px; --fs-l:15px; --fs-xl:20px;
+    --r-s:4px; --r-m:6px; --r-l:12px;
+    --bar:36px; --pill-space:84px;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--surround); color:var(--text); overflow:hidden;
+    font:var(--fs-m)/1.4 var(--sans); }
+  button{ font:inherit; color:inherit; }
+  [hidden]{ display:none !important; }
+  .px{ font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  :focus-visible{ outline:2px solid var(--cyan); outline-offset:2px; }
+
+  /* ---------- строка статуса ---------- */
+  #bar{ position:fixed; inset:0 0 auto 0; height:var(--bar); z-index:30; display:grid; grid-template-columns:1fr auto 1fr;
+    align-items:center; gap:12px; padding:0 8px 0 14px; background:var(--chrome); backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--lineSoft); transition:opacity .2s; }
+  #bar .meta{ display:flex; align-items:center; gap:12px; min-width:0; font-size:var(--fs-s); color:var(--muted); }
+  #fileName{ color:var(--text); font-size:var(--fs-m); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  #zoomBtn{ height:24px; padding:0 7px; border:1px solid var(--line); border-radius:var(--r-m); background:transparent;
+    color:var(--muted); font-size:var(--fs-s); cursor:pointer; }
+  #zoomBtn:hover{ color:var(--text); border-color:var(--muted); }
+  #navRow{ display:flex; align-items:center; gap:2px; font-size:var(--fs-s); color:var(--muted); grid-column:2; }
+  #navPos{ min-width:54px; text-align:center; }
+  .tools{ display:flex; gap:2px; justify-self:end; grid-column:3; }
+  .iconBtn{ width:30px; height:28px; display:grid; place-items:center; border:0; background:transparent; color:var(--muted);
+    border-radius:var(--r-m); cursor:pointer; flex:none; }
+  .iconBtn:hover{ background:var(--lineSoft); color:var(--text); }
+  .iconBtn.on{ color:var(--cyan); background:var(--cyanSoft); }
+  .iconBtn:disabled{ opacity:.3; cursor:default; background:transparent; }
+
+  /* ---------- рабочая область ---------- */
+  #workspace{ position:fixed; inset:var(--bar) 0 0 0; display:none; }
+  #viewport{ position:absolute; inset:0 0 var(--pill-space) 0; overflow:hidden; }
+  /* Положение изображения задаётся transform-ом, а не прокруткой вьюпорта:
+     смещение — обычная переменная в JS, поэтому пан и якорь зума считаются
+     точно и не зависят от того, как браузер решит скроллить контейнер. */
+  #scrollInner{ position:absolute; left:0; top:0; will-change:transform; }
+  #stage{ position:relative; background:#000; user-select:none; overflow:hidden; flex:none;
+    box-shadow:0 18px 50px rgba(0,0,0,.45); }
+  #stage img{ display:block; }
+  #stage.canPan{ cursor:grab; }
+  #stage.panning{ cursor:grabbing; }
+  #cropBox{ position:absolute; display:none; outline:1.5px solid var(--cyan); box-shadow:0 0 0 9999px var(--dim);
+    cursor:move; touch-action:none; }
+  #cropBox .thirds{ position:absolute; inset:0; opacity:0; transition:opacity .15s; pointer-events:none;
+    background:
+      linear-gradient(to right, transparent calc(33.33% - .5px), rgba(255,255,255,.4) 0 calc(33.33% + .5px), transparent 0 calc(66.66% - .5px), rgba(255,255,255,.4) 0 calc(66.66% + .5px), transparent 0),
+      linear-gradient(to bottom, transparent calc(33.33% - .5px), rgba(255,255,255,.4) 0 calc(33.33% + .5px), transparent 0 calc(66.66% - .5px), rgba(255,255,255,.4) 0 calc(66.66% + .5px), transparent 0); }
+  #cropBox.drag .thirds{ opacity:1; }
+  .handle{ position:absolute; width:28px; height:28px; touch-action:none; z-index:2; }
+  .handle::after{ content:""; position:absolute; width:16px; height:16px; border:3px solid var(--cyan); }
+  .handle.tl{ left:-9px; top:-9px; cursor:nwse-resize; } .handle.tl::after{ left:6px; top:6px; border-right:0; border-bottom:0; }
+  .handle.tr{ right:-9px; top:-9px; cursor:nesw-resize; } .handle.tr::after{ right:6px; top:6px; border-left:0; border-bottom:0; }
+  .handle.bl{ left:-9px; bottom:-9px; cursor:nesw-resize; } .handle.bl::after{ left:6px; bottom:6px; border-right:0; border-top:0; }
+  .handle.br{ right:-9px; bottom:-9px; cursor:nwse-resize; } .handle.br::after{ right:6px; bottom:6px; border-left:0; border-top:0; }
+
+  /* Размерные линии — как на чертеже: сколько пикселей исходника попадает в
+     рамку. Живут в координатах вьюпорта (а не внутри #stage, который обрезает
+     всё по краю картинки): снаружи рамки, а если места нет — внутри. */
+  .dim{ position:absolute; display:none; pointer-events:none; color:var(--cyan); }
+  .dim::before{ content:""; position:absolute; }
+  .dim .lbl{ position:absolute; display:flex; gap:6px; align-items:center; white-space:nowrap; padding:1px 6px;
+    border-radius:var(--r-s); background:var(--chromeSolid); font:600 var(--fs-s) var(--mono); font-variant-numeric:tabular-nums; }
+  #dimW{ height:9px; border-left:1px solid; border-right:1px solid; }
+  #dimW::before{ left:0; right:0; top:4px; border-top:1px solid; }
+  #dimW .lbl{ top:50%; transform:translate(-50%,-50%); }
+  #dimH{ width:9px; border-top:1px solid; border-bottom:1px solid; }
+  #dimH::before{ top:0; bottom:0; left:4px; border-left:1px solid; }
+  #dimH .lbl{ left:50%; transform:translate(-50%,-50%) rotate(-90deg); }
+  .k{ padding:0 5px; border-radius:3px; color:var(--muted); background:rgba(255,255,255,.06); }
+  .k.one{ color:var(--cyan); background:var(--cyanSoft); }
+  .k.up{ color:var(--amber); background:var(--amberSoft); }
+
+  /* ---------- пустой экран ---------- */
+  #dropzone{ position:fixed; inset:var(--bar) 0 0 0; display:grid; place-items:center; }
+  .drop{ width:min(520px, calc(100vw - 48px)); padding:48px 32px 40px; border:1.5px dashed var(--line); border-radius:16px;
+    text-align:center; background:rgba(14,24,40,.55); cursor:pointer; transition:border-color .15s, background .15s; }
+  .drop:hover{ border-color:var(--cyan); background:var(--cyanSoft); }
+  .drop h2{ margin:16px 0 6px; font-size:var(--fs-xl); font-weight:600; }
+  .drop p{ margin:0; color:var(--muted); }
+  .drop .keys{ margin-top:22px; display:flex; gap:16px; justify-content:center; flex-wrap:wrap; color:var(--muted); font-size:var(--fs-s); }
+  kbd{ font:600 11px var(--mono); padding:1px 6px; border-radius:var(--r-s); border:1px solid var(--line); border-bottom-width:2px;
+    color:var(--text); background:var(--pop); }
+  #dropHint{ position:fixed; inset:0; z-index:70; display:none; place-items:center; pointer-events:none;
+    background:rgba(8,14,24,.7); border:2px dashed var(--cyan); }
+  #dropHint.on{ display:grid; }
+  #dropHint div{ padding:12px 18px; border-radius:var(--r-l); background:var(--pop); font-size:var(--fs-l); }
+
+  /* ---------- пилюля: размер и сохранение ---------- */
+  #pill{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:30; display:none; align-items:center; gap:4px;
+    padding:6px; border-radius:14px; background:var(--chrome); backdrop-filter:blur(16px); border:1px solid var(--line);
+    box-shadow:0 12px 40px rgba(0,0,0,.5); max-width:calc(100vw - 24px); }
+  body.ready #pill{ display:flex; }
+  .div{ width:1px; height:24px; background:var(--line); margin:0 4px; flex:none; }
+  .pbtn{ height:36px; display:flex; align-items:center; gap:6px; padding:0 10px; border:0; border-radius:var(--r-m); background:transparent;
+    color:var(--text); cursor:pointer; white-space:nowrap; }
+  .pbtn:hover, .pbtn[aria-expanded="true"]{ background:var(--lineSoft); }
+  .pbtn .caret{ color:var(--muted); font-size:10px; }
+  .dims{ display:flex; align-items:center; gap:2px; }
+  .dims input{ width:74px; height:36px; border:1px solid transparent; border-radius:var(--r-m); background:rgba(0,0,0,.28);
+    color:var(--text); font:600 var(--fs-l) var(--mono); text-align:center; -moz-appearance:textfield; }
+  .dims input:hover{ border-color:var(--line); }
+  .dims input:focus{ outline:none; border-color:var(--cyan); }
+  .dims input::-webkit-inner-spin-button{ -webkit-appearance:none; }
+  #downloadBtn{ height:36px; display:flex; align-items:center; gap:8px; padding:0 16px; margin-left:4px; border:0; border-radius:9px;
+    background:var(--amber); color:#1A1206; font-weight:650; cursor:pointer; white-space:nowrap; }
+  #downloadBtn:hover{ filter:brightness(1.08); }
+  #downloadBtn:disabled{ background:var(--line); color:var(--muted); cursor:not-allowed; filter:none; }
+
+  /* ---------- поповеры ---------- */
+  .pop{ position:fixed; z-index:40; display:none; background:var(--pop); border:1px solid var(--line); border-radius:var(--r-l);
+    box-shadow:0 16px 48px rgba(0,0,0,.55); padding:14px; max-width:calc(100vw - 16px);
+    overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+  .pop.open{ display:block; animation:popIn .14s ease-out; }
+  @keyframes popIn{ from{ opacity:0; transform:translateY(6px);} to{ opacity:1; transform:none; } }
+  .pop .sec + .sec{ margin-top:14px; }
+  .pop .ttl{ margin:0 0 8px; font-size:var(--fs-s); color:var(--muted); }
+  #ratioGrid{ display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; }
+  .chip{ display:flex; flex-direction:column; align-items:center; gap:6px; padding:9px 4px 8px; border:1px solid var(--line);
+    border-radius:var(--r-m); background:transparent; cursor:pointer; color:var(--text); }
+  .chip:hover{ border-color:var(--muted); }
+  .chip.active{ border-color:var(--cyan); background:var(--cyanSoft); color:var(--cyan); }
+  .chip .shape{ border:1.5px solid currentColor; border-radius:2px; opacity:.75; }
+  .chip .rTitle{ font:600 var(--fs-s) var(--mono); }
+  .chip .rDesc{ font-size:11px; color:var(--muted); text-align:center; line-height:1.2; }
+  #presets{ display:flex; flex-wrap:wrap; gap:6px; }
+  #presets .chip{ flex-direction:row; padding:6px 9px; font:600 var(--fs-s) var(--mono); }
+  .seg{ display:flex; padding:3px; gap:3px; border-radius:8px; background:rgba(0,0,0,.28); }
+  .seg button{ flex:1; height:30px; border:0; border-radius:var(--r-m); background:transparent; color:var(--muted); cursor:pointer; }
+  .seg button.active{ background:var(--cyanSoft); color:var(--cyan); }
+  .hint{ font-size:var(--fs-s); color:var(--muted); margin:10px 0 0; }
+  .qHead{ display:flex; justify-content:space-between; font-size:var(--fs-s); color:var(--muted); margin:12px 0 6px; }
+  #qualityRange{ width:100%; accent-color:var(--cyan); }
+
+  /* ---------- сообщения и справка ---------- */
+  /* Сообщение об ошибке видно в любом режиме, включая фокус, и само гаснет. */
+  #notice, #hint{ position:fixed; left:50%; bottom:calc(var(--pill-space) + 4px); transform:translateX(-50%); z-index:60; display:none;
+    max-width:min(520px, calc(100vw - 32px)); padding:9px 14px; border-radius:9px; background:var(--pop);
+    border:1px solid var(--rose); font-size:var(--fs-m); line-height:1.4; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  #hint{ border-color:var(--line); color:var(--muted); pointer-events:none; }
+  #help{ position:fixed; inset:0; z-index:80; display:none; place-items:center; background:rgba(0,0,0,.55); }
+  #help.open{ display:grid; }
+  #help .card{ width:min(460px, calc(100vw - 32px)); max-height:calc(100vh - 32px); overflow-y:auto;
+    background:var(--pop); border:1px solid var(--line); border-radius:14px; padding:20px 22px; }
+  #help h3{ margin:0 0 14px; font-size:var(--fs-l); font-weight:600; }
+  #help dl{ display:grid; grid-template-columns:auto 1fr; gap:9px 16px; margin:0; }
+  #help dt{ text-align:right; white-space:nowrap; } #help dd{ margin:0; color:var(--muted); }
+
+  /* ---------- состояния ---------- */
+  body:not(.ready) #fileSize, body:not(.ready) #zoomBtn, body:not(.ready) #cropToggleBtn,
+  body:not(.ready) #focusToggleBtn{ display:none; }
+  body.ready #dropzone{ display:none; }
+  body.ready #workspace{ display:block; }
+
+  /* Режим фокуса: только изображение. Строка статуса прозрачна и проявляется
+     при наведении; рамка, размеры и пилюля скрыты; ЛКМ по картинке — пан. */
+  body.focusMode #workspace{ inset:0; }
+  body.focusMode #viewport{ inset:0; }
+  body.focusMode #pill{ display:none; }
+  body.focusMode #bar{ opacity:0; }
+  body.focusMode #bar:hover, body.focusMode #bar:focus-within{ opacity:1; }
+  body.focusMode #notice, body.focusMode #hint{ bottom:22px; }
+
+  /* ---------- адаптивность ---------- */
+  @media (max-height: 760px){
+    .chip{ padding:6px 4px 5px; gap:4px; }
+    .chip .rDesc{ display:none; }
+    .pop .sec + .sec{ margin-top:10px; }
+  }
+  @media (max-height: 560px){
+    :root{ --pill-space:62px; }
+    .chip .shape{ display:none; }
+    #ratioGrid{ grid-template-columns:repeat(6, 1fr); }
+    #pill{ bottom:10px; }
+    #help dl{ gap:6px 14px; }
+  }
+  @media (max-width: 760px){
+    #downloadBtn .lbl, #fileSize{ display:none; }
+    .dims input{ width:62px; font-size:14px; }
+  }
+  @media (max-width: 560px){
+    #helpBtn, #zoomBtn{ display:none; }
+    #navPos{ min-width:40px; }
+    #bar{ gap:6px; }
+  }
+  @media (max-width: 420px){ #ratioGrid{ grid-template-columns:repeat(3, 1fr); } }
+  @media (prefers-reduced-motion: reduce){ *, *::before, *::after{ animation:none !important; transition:none !important; } }
+</style>
+</head>
+<body>
+<div id="notice" role="alert"></div>
+<div id="hint" role="status"></div>
+
+<header id="bar">
+  <div class="meta">
+    <span id="fileName">Pic Chop Crop</span>
+    <span id="fileSize" class="px"></span>
+    <button id="zoomBtn" class="px" title="Масштаб. Нажмите: вписать в окно ↔ 100 % (клавиши 0 и 1)">100 %</button>
+  </div>
+  <div id="navRow" hidden>
+    <button id="prevBtn" class="iconBtn" aria-label="Предыдущий файл" title="Предыдущий файл в папке (←)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></button>
+    <span id="navPos" class="px"></span>
+    <button id="nextBtn" class="iconBtn" aria-label="Следующий файл" title="Следующий файл в папке (→)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>
+  </div>
+  <div class="tools">
+    <button id="openBtn" class="iconBtn" aria-label="Открыть файл" title="Открыть файл (Ctrl+O)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+    <button id="cropToggleBtn" class="iconBtn" aria-label="Рамка" aria-pressed="false" title="Показать или скрыть рамку (C)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14"/></svg></button>
+    <button id="focusToggleBtn" class="iconBtn" aria-label="Режим фокуса" aria-pressed="false" title="Только изображение (F, выйти — Esc)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/></svg></button>
+    <button id="helpBtn" class="iconBtn" aria-label="Горячие клавиши" title="Горячие клавиши (?)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></button>
+  </div>
+</header>
+
+<section id="dropzone">
+  <div class="drop" id="dropCard" tabindex="0" role="button" aria-label="Открыть изображение">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted)"><path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14"/></svg>
+    <h2>Откройте изображение</h2>
+    <p>Перетащите JPG или PNG сюда либо нажмите, чтобы выбрать файл</p>
+    <div class="keys"><span><kbd>Ctrl</kbd> <kbd>O</kbd> открыть</span><span><kbd>?</kbd> все клавиши</span></div>
+  </div>
+</section>
+<div id="dropHint"><div>Отпустите, чтобы открыть</div></div>
+
+<div id="workspace">
+  <div id="viewport">
+    <div id="scrollInner">
+      <div id="stage">
+        <img id="img" alt="" draggable="false">
+        <div id="cropBox">
+          <div class="thirds"></div>
+          <div class="handle tl" data-corner="tl"></div>
+          <div class="handle tr" data-corner="tr"></div>
+          <div class="handle bl" data-corner="bl"></div>
+          <div class="handle br" data-corner="br"></div>
+        </div>
+      </div>
+    </div>
+    <div class="dim" id="dimW"><span class="lbl"><span id="dimWv"></span><span class="k" id="dimK"></span></span></div>
+    <div class="dim" id="dimH"><span class="lbl" id="dimHv"></span></div>
+  </div>
+</div>
+
+<nav id="pill" aria-label="Размер и сохранение">
+  <button id="ratioBtn" class="pbtn" aria-haspopup="true" aria-expanded="false" title="Соотношение сторон и готовые размеры">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1.5"/></svg>
+    <span id="ratioLbl" class="px">16:9</span><span class="caret">▾</span>
+  </button>
+  <div class="div"></div>
+  <div class="dims">
+    <input id="inputW" type="number" min="1" max="8000" value="1920" aria-label="Ширина результата, px" title="Ширина результата, px">
+    <button id="flipBtn" class="iconBtn" aria-label="Поменять ширину и высоту" title="Поменять ширину и высоту (X)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg></button>
+    <input id="inputH" type="number" min="1" max="8000" value="1080" aria-label="Высота результата, px" title="Высота результата, px">
+  </div>
+  <div class="div"></div>
+  <button id="fmtBtn" class="pbtn" aria-haspopup="true" aria-expanded="false" title="Формат файла">
+    <span id="fmtLbl">PNG</span><span class="caret">▾</span>
+  </button>
+  <button id="downloadBtn" disabled aria-label="Сохранить 1920×1080" title="Сохранить 1920×1080 (Ctrl+S)">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+    <span id="downloadLabel" class="lbl">Сохранить</span>
+  </button>
+</nav>
+
+<div class="pop" id="ratioPop" style="width:372px" role="dialog" aria-label="Соотношение и размеры">
+  <div class="sec"><p class="ttl">Соотношение сторон — длинная сторона сохраняется</p><div id="ratioGrid"></div></div>
+  <div class="sec"><p class="ttl">Готовые размеры</p><div id="presets"></div></div>
+</div>
+
+<div class="pop" id="fmtPop" style="width:250px" role="dialog" aria-label="Формат">
+  <div class="seg">
+    <button class="fmt active" data-fmt="png">PNG</button>
+    <button class="fmt" data-fmt="jpeg">JPEG</button>
+  </div>
+  <div id="qualityRow" hidden>
+    <div class="qHead"><span>Качество</span><span id="qualityLabel" class="px">92</span></div>
+    <input id="qualityRange" type="range" min="0.5" max="1" step="0.01" value="0.92" aria-label="Качество JPEG">
+  </div>
+  <p class="hint" id="fmtHint">Без потерь, прозрачность сохраняется</p>
+</div>
+
+<div id="help" role="dialog" aria-label="Горячие клавиши">
+  <div class="card">
+    <h3>Горячие клавиши</h3>
+    <dl>
+      <dt><kbd>C</kbd></dt><dd>Показать или скрыть рамку</dd>
+      <dt><kbd>F</kbd> <kbd>Esc</kbd></dt><dd>Только изображение / вернуть рамку и настройки</dd>
+      <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Предыдущий и следующий файл в папке</dd>
+      <dt><kbd>Shift</kbd> + стрелки</dt><dd>Сдвинуть рамку на 1 px, с <kbd>Ctrl</kbd> — на 10 px</dd>
+      <dt><kbd>X</kbd></dt><dd>Поменять ширину и высоту</dd>
+      <dt><kbd>0</kbd></dt><dd>Вписать изображение в окно</dd>
+      <dt><kbd>1</kbd></dt><dd>Масштаб 100 %</dd>
+      <dt>Колесо</dt><dd>Масштаб под курсором</dd>
+      <dt>Перетаскивание вне рамки</dt><dd>Двигать изображение (средней кнопкой — всегда)</dd>
+      <dt><kbd>Ctrl</kbd> <kbd>S</kbd></dt><dd>Сохранить</dd>
+      <dt><kbd>Ctrl</kbd> <kbd>O</kbd></dt><dd>Открыть файл</dd>
+    </dl>
+  </div>
+</div>
+
+<input id="fileInput" type="file" accept="image/jpeg,image/png" style="display:none">
+
+<script>
+(function(){
+  "use strict";
+
+  var PRESETS = [
+    { w:1920, h:1080 }, { w:2560, h:1440 }, { w:3840, h:2160 },
+    { w:1080, h:1080 }, { w:2560, h:2560 }, { w:3840, h:3840 },
+    { w:1080, h:1920 }, { w:1200, h:630 }
+  ];
+  var RATIOS = [
+    { label:"1:1",    w:1,    h:1,   desc:"Аватар, пост" },
+    { label:"4:3",    w:4,    h:3,   desc:"Фото, iPad" },
+    { label:"3:2",    w:3,    h:2,   desc:"Зеркалка" },
+    { label:"16:9",   w:16,   h:9,   desc:"Видео, ТВ" },
+    { label:"16:10",  w:16,   h:10,  desc:"Мониторы" },
+    { label:"21:9",   w:21,   h:9,   desc:"UltraWide" },
+    { label:"2.39:1", w:2.39, h:1,   desc:"Кино" },
+    { label:"5:4",    w:5,    h:4,   desc:"Печать 8×10" },
+    { label:"9:16",   w:9,    h:16,  desc:"Stories, Reels" },
+    { label:"4:5",    w:4,    h:5,   desc:"Instagram" },
+    { label:"2:3",    w:2,    h:3,   desc:"Фото 10×15" },
+    { label:"3:4",    w:3,    h:4,   desc:"Pinterest" }
+  ];
+  var DEFAULT_W = 1920, DEFAULT_H = 1080;
+  var MIN_BOX = 28, MIN_ZOOM = 1, MAX_ZOOM = 6;
+  var FIT_PAD = 36;      // поле вокруг вписанного изображения — место под размерные линии
+  var DIM_ROOM = 30;     // сколько места нужно размерной линии снаружи рамки
+  var GAP = 8;
+
+  var natural = { w:0, h:0 };
+  var display = { w:0, h:0, scale:1 };
+  var baseScale = 1;
+  var zoom = 1;
+  var offX = 0, offY = 0;   // смещение изображения во вьюпорте, px
+  var targetW = DEFAULT_W, targetH = DEFAULT_H;
+  var box = null;           // рамка в координатах #stage (px на экране)
+  var format = "png";
+  var quality = 0.92;
+  var fileName = "";        // имя без расширения — для имени сохраняемого файла
+  var ready = false;
+  var imgEl = null;         // Image() used for canvas export
+  var dragState = null;
+
+  var currentPath = null;   // set once a file was loaded via Tauri (not drag&drop)
+  var siblings = [];        // sibling jpg/jpeg/png paths in the same folder, natural-sorted
+  var siblingIndex = -1;    // файл, который сейчас на экране
+  var navIndex = -1;        // файл, к которому идёт Prev/Next (может ещё грузиться)
+  // Номер последней запрошенной загрузки. Каждый асинхронный шаг сверяется с
+  // ним и выбрасывает свой результат, если за это время начали грузить другой
+  // файл — иначе при зажатой ←/→ картинка и имя файла могут разъехаться.
+  var loadSeq = 0;
+  var tauri = window.__TAURI__ || null;
+  var focusMode = false;
+  var cropActive = true;    // рамка видна всегда, когда не включён фокус (C — скрыть)
+  var focusHintShown = false;
+
+  function $(id){ return document.getElementById(id); }
+  var dropzone = $("dropzone"), fileInput = $("fileInput"), stage = $("stage"), imgTag = $("img");
+  var cropBox = $("cropBox"), inputW = $("inputW"), inputH = $("inputH");
+  var presetsEl = $("presets"), ratioGridEl = $("ratioGrid");
+  var qualityRow = $("qualityRow"), qualityRange = $("qualityRange"), qualityLabel = $("qualityLabel");
+  var downloadBtn = $("downloadBtn"), cropToggleBtn = $("cropToggleBtn"), focusToggleBtn = $("focusToggleBtn");
+  var flipBtn = $("flipBtn"), navRow = $("navRow"), prevBtn = $("prevBtn"), nextBtn = $("nextBtn"), navPos = $("navPos");
+  var notice = $("notice"), hint = $("hint"), viewport = $("viewport"), scrollInner = $("scrollInner");
+  var dimW = $("dimW"), dimH = $("dimH"), pill = $("pill"), help = $("help");
+
+  function clamp(v, min, max){ return Math.min(Math.max(v, min), max); }
+
+  function fitBox(dw, dh, aspect){
+    var w, h;
+    if (dw / dh > aspect){ h = dh; w = h * aspect; }
+    else { w = dw; h = w / aspect; }
+    w *= 0.86; h *= 0.86;
+    return { x:(dw - w)/2, y:(dh - h)/2, w:w, h:h };
+  }
+
+  // How much the image is scaled to fit the current viewport size, before
+  // the user's zoom multiplier is applied on top. Recomputed whenever the
+  // window (and therefore the viewport) resizes.
+  function computeBaseScale(){
+    var pad = focusMode ? 0 : FIT_PAD;
+    var availW = Math.max(80, viewport.clientWidth - 2 - pad * 2);
+    var availH = Math.max(80, viewport.clientHeight - 2 - pad * 2);
+    var cap = focusMode ? 8 : 4;
+    return Math.min(availW / natural.w, availH / natural.h, cap);
+  }
+
+  // До 100 % можно дойти всегда, даже если это больше обычного предела зума.
+  function maxZoom(){ return Math.max(MAX_ZOOM, 1 / baseScale); }
+
+  function resizeStageTo(newScale){
+    display = { w: natural.w * newScale, h: natural.h * newScale, scale: newScale };
+    imgTag.style.width = display.w + "px";
+    imgTag.style.height = display.h + "px";
+    stage.style.width = display.w + "px";
+    stage.style.height = display.h + "px";
+    $("zoomBtn").textContent = Math.round(newScale * 100) + " %";
+  }
+
+  // Смещение изображения внутри вьюпорта. Это единственный источник правды
+  // о том, где картинка находится: и пан, и зум правят только offX/offY.
+  function applyTransform(){
+    scrollInner.style.transform = "translate(" + Math.round(offX) + "px," + Math.round(offY) + "px)";
+    renderDims();
+  }
+
+  // Если изображение меньше вьюпорта по оси — центрируем по ней; если больше —
+  // не даём утащить его так, чтобы у края образовалась пустота.
+  function clampOffsets(){
+    var vw = viewport.clientWidth, vh = viewport.clientHeight;
+    offX = display.w <= vw ? (vw - display.w) / 2 : clamp(offX, vw - display.w, 0);
+    offY = display.h <= vh ? (vh - display.h) / 2 : clamp(offY, vh - display.h, 0);
+  }
+
+  function panBy(dx, dy){
+    offX += dx;
+    offY += dy;
+    clampOffsets();
+    applyTransform();
+  }
+
+  // Меняет масштаб, сохраняя привязку рамки кропа к тому же куску картинки.
+  // Если передана точка (курсор при зуме колесом) — она остаётся на месте:
+  // считаем, в какой пиксель изображения она указывает, и после ресайза
+  // подставляем смещение так, чтобы этот пиксель снова оказался под курсором.
+  function applyScale(newScale, anchorClientX, anchorClientY){
+    newScale = clamp(newScale, 0.01, 50);
+    var oldScale = display.scale || newScale;
+    var ratio = newScale / oldScale;
+    var rect = viewport.getBoundingClientRect();
+    var hasAnchor = typeof anchorClientX === "number";
+    var px, py, imgX, imgY;
+
+    if (hasAnchor){
+      px = anchorClientX - rect.left;   // курсор в координатах вьюпорта
+      py = anchorClientY - rect.top;
+      imgX = (px - offX) / oldScale;    // пиксель изображения под курсором
+      imgY = (py - offY) / oldScale;
+    }
+
+    resizeStageTo(newScale);
+
+    if (box){
+      box = { x: box.x * ratio, y: box.y * ratio, w: box.w * ratio, h: box.h * ratio };
+    }
+
+    if (hasAnchor){
+      offX = px - imgX * newScale;
+      offY = py - imgY * newScale;
+    } else {
+      // без якоря удерживаем центр вьюпорта
+      offX = viewport.clientWidth / 2 - (viewport.clientWidth / 2 - offX) * ratio;
+      offY = viewport.clientHeight / 2 - (viewport.clientHeight / 2 - offY) * ratio;
+    }
+
+    clampOffsets();
+    applyTransform();
+    renderBox();
+  }
+
+  function recomputeBaseScale(){
+    if (!ready) return;
+    baseScale = computeBaseScale();
+    zoom = clamp(zoom, MIN_ZOOM, maxZoom());
+    applyScale(baseScale * zoom);
+  }
+
+  function setZoom(z, clientX, clientY){
+    if (!ready) return;
+    zoom = clamp(z, MIN_ZOOM, maxZoom());
+    applyScale(baseScale * zoom, clientX, clientY);
+  }
+
+  function fitToWindow(){ setZoom(1); }
+  function actualSize(){ setZoom(1 / baseScale); }
+
+  // ---------- размер результата ----------
+
+  function currentRatioMatch(){
+    for (var i = 0; i < RATIOS.length; i++){
+      var r = RATIOS[i];
+      if (Math.abs(targetW / targetH - r.w / r.h) < 0.005) return r.label;
+    }
+    return null;
+  }
+
+  // Подпись соотношения в пилюле: пресет, иначе сокращённая дробь (3840×1080 → 32:9).
+  function ratioLabel(){
+    var m = currentRatioMatch();
+    if (m) return m;
+    var a = targetW, b = targetH, t;
+    while (b){ t = a % b; a = b; b = t; }
+    return targetW / a <= 64 && targetH / a <= 64 ? (targetW / a) + ":" + (targetH / a) : "Своё";
+  }
+
+  // Выбор соотношения сохраняет длинную сторону текущего размера: из 1920×1080
+  // 9:16 даёт 1080×1920, а 1:1 — 1920×1920. Другое — вводится числом.
+  function applyRatio(r){
+    var long = Math.max(targetW, targetH);
+    if (r.w >= r.h){
+      targetW = long;
+      targetH = clamp(Math.round(long * r.h / r.w), 1, 8000);
+    } else {
+      targetH = long;
+      targetW = clamp(Math.round(long * r.w / r.h), 1, 8000);
+    }
+    setTarget(targetW, targetH);
+  }
+
+  function setTarget(w, h){
+    targetW = clamp(w, 1, 8000);
+    targetH = clamp(h, 1, 8000);
+    inputW.value = targetW;
+    inputH.value = targetH;
+    onTargetChanged();
+    enableCrop();   // смена размера = показать рамку
+  }
+
+  function shapeHtml(w, h){
+    var k = 22 / Math.max(w, h);
+    return '<i class="shape" style="width:' + (w * k) + 'px;height:' + (h * k) + 'px"></i>';
+  }
+
+  function buildRatioGrid(){
+    ratioGridEl.innerHTML = "";
+    var active = currentRatioMatch();
+    RATIOS.forEach(function(r){
+      var b = document.createElement("button");
+      b.className = "chip ratioCard" + (r.label === active ? " active" : "");
+      b.title = r.label + " — " + r.desc;
+      b.innerHTML = shapeHtml(r.w, r.h) + '<span class="rTitle">' + r.label + '</span><span class="rDesc">' + r.desc + '</span>';
+      b.addEventListener("click", function(){ applyRatio(r); closePops(); });
+      ratioGridEl.appendChild(b);
+    });
+  }
+
+  function buildPresets(){
+    presetsEl.innerHTML = "";
+    PRESETS.forEach(function(p){
+      var b = document.createElement("button");
+      b.className = "chip preset" + (p.w === targetW && p.h === targetH ? " active" : "");
+      b.textContent = p.w + "×" + p.h;
+      b.addEventListener("click", function(){ setTarget(p.w, p.h); closePops(); });
+      presetsEl.appendChild(b);
+    });
+  }
+
+  // ---------- рамка ----------
+
+  // Рамка видна только когда: файл открыт, рамка включена и мы не в фокусе.
+  function updateCropVisibility(){
+    var show = ready && cropActive && !focusMode;
+    cropBox.style.display = show ? "block" : "none";
+    dimW.style.display = dimH.style.display = show ? "block" : "none";
+    cropToggleBtn.classList.toggle("on", show);
+    cropToggleBtn.setAttribute("aria-pressed", String(show));
+    // "рука" показывается везде, где ЛКМ действительно панорамирует
+    stage.classList.toggle("canPan", ready);
+    if (show){ stage.classList.remove("panning"); renderDims(); }
+  }
+
+  function enableCrop(){
+    cropActive = true;
+    if (focusMode){
+      focusMode = false;
+      updateChromeVisibility();
+      recomputeBaseScale();
+    } else {
+      updateCropVisibility();
+    }
+  }
+
+  function renderBox(){
+    if (!box) return;
+    cropBox.style.left = box.x + "px";
+    cropBox.style.top = box.y + "px";
+    cropBox.style.width = box.w + "px";
+    cropBox.style.height = box.h + "px";
+    renderDims();
+  }
+
+  // Размерные линии: пиксели исходника в рамке и во сколько раз их пересчитают.
+  // Снаружи рамки не хватает места — рисуем внутри. Если рамка больше окна
+  // (крупный масштаб), подписи держатся в её видимой части.
+  function renderDims(){
+    if (!box || dimW.style.display !== "block") return;
+    var s = display.scale;
+    var srcW = Math.round(box.w / s), srcH = Math.round(box.h / s);
+    $("dimWv").textContent = srcW + " px";
+    $("dimHv").textContent = srcH + " px";
+
+    var k = targetW / (box.w / s), K = $("dimK");
+    if (Math.abs(k - 1) < 0.01){ K.className = "k one"; K.textContent = "1:1"; K.title = "Пиксель в пиксель, без пересчёта"; }
+    else if (k > 1.08){ K.className = "k up"; K.textContent = "↑ " + k.toFixed(1) + "×"; K.title = "В рамке меньше пикселей, чем нужно: изображение растянется и может потерять чёткость"; }
+    else { K.className = "k"; K.textContent = (k > 1 ? "↑ " : "↓ ") + k.toFixed(2) + "×"; K.title = k > 1 ? "Небольшое растяжение" : "Будет уменьшено"; }
+
+    var vw = viewport.clientWidth, vh = viewport.clientHeight;
+    var cl = offX + box.x, ct = offY + box.y, cw = box.w, ch = box.h;
+    var inW = ct < DIM_ROOM, inH = cl < DIM_ROOM;
+    dimW.style.left = cl + "px";
+    dimW.style.width = cw + "px";
+    dimW.style.top = (inW ? Math.max(ct + 12, 12) : ct - 21) + "px";
+    dimH.style.top = ct + "px";
+    dimH.style.height = ch + "px";
+    dimH.style.left = (inH ? Math.max(cl + 12, 12) : cl - 21) + "px";
+
+    var vx0 = Math.max(cl, 0), vx1 = Math.min(cl + cw, vw);
+    var vy0 = Math.max(ct, 0), vy1 = Math.min(ct + ch, vh);
+    dimW.firstElementChild.style.left = (vx1 > vx0 ? (vx0 + vx1) / 2 - cl : cw / 2) + "px";
+    dimH.firstElementChild.style.top = (vy1 > vy0 ? (vy0 + vy1) / 2 - ct : ch / 2) + "px";
+  }
+
+  function onTargetChanged(){
+    buildPresets();
+    buildRatioGrid();
+    $("ratioLbl").textContent = ratioLabel();
+    var size = targetW + "×" + targetH;
+    downloadBtn.setAttribute("aria-label", "Сохранить " + size);
+    downloadBtn.title = "Сохранить " + size + " (Ctrl+S)";
+    if (!ready) return;
+    // Новую рамку вписываем в видимую часть картинки, а не во всю: при
+    // сильном зуме иначе рамка вылезает за окно и её углы не достать.
+    var area = visibleArea();
+    var fitted = fitBox(area.w, area.h, targetW / targetH);
+    var w = fitted.w, h = fitted.h;
+    var cx = box ? box.x + box.w/2 : area.x + area.w/2;
+    var cy = box ? box.y + box.h/2 : area.y + area.h/2;
+    box = {
+      x: clamp(cx - w/2, area.x, area.x + area.w - w),
+      y: clamp(cy - h/2, area.y, area.y + area.h - h),
+      w: w, h: h
+    };
+    renderBox();
+  }
+
+  // Часть изображения (в координатах stage), которая сейчас видна во вьюпорте.
+  function visibleArea(){
+    var x0 = Math.max(0, -offX), y0 = Math.max(0, -offY);
+    var x1 = Math.min(display.w, viewport.clientWidth - offX);
+    var y1 = Math.min(display.h, viewport.clientHeight - offY);
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  // Сдвиг рамки с клавиатуры на целое число пикселей исходника.
+  function nudge(dx, dy){
+    var s = display.scale;
+    var sx = Math.round(box.x / s) + dx, sy = Math.round(box.y / s) + dy;
+    box = { x: clamp(sx * s, 0, display.w - box.w), y: clamp(sy * s, 0, display.h - box.h), w: box.w, h: box.h };
+    renderBox();
+  }
+
+  // ---------- сообщения ----------
+
+  var noticeTimer = null;
+  function showNotice(text){
+    notice.textContent = text;
+    notice.style.display = "block";
+    hint.style.display = "none";
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(function(){ notice.style.display = "none"; }, 6000);
+  }
+
+  var hintTimer = null;
+  function showHint(text){
+    hint.textContent = text;
+    hint.style.display = "block";
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(function(){ hint.style.display = "none"; }, 4000);
+  }
+
+  // Загрузка не удалась: счётчик Prev/Next возвращается к тому файлу, что
+  // реально на экране, а пользователь видит, что случилось.
+  function loadFailed(seq, text){
+    if (seq !== loadSeq) return;
+    navIndex = siblingIndex;
+    showNotice(text);
+  }
+
+  // ---------- загрузка ----------
+
+  function loadFile(file, name, onLoaded){
+    if (!file || !/^image\//.test(file.type)){
+      showNotice("Это не изображение — поддерживаются JPG и PNG");
+      return;
+    }
+    var seq = ++loadSeq;
+    var fullName = file.name || name || "";
+    var newName = name || (file.name ? file.name.replace(/\.[^.]+$/, "") : "");
+    var firstOpen = !ready;   // при первом открытии сразу входим в режим фокуса
+    var brokenText = "Не удалось открыть «" + (newName || "файл") + "» — файл повреждён или это не изображение";
+    var reader = new FileReader();
+    reader.onerror = function(){ loadFailed(seq, brokenText); };
+    reader.onload = function(ev){
+      if (seq !== loadSeq) return;
+      var src = ev.target.result;
+      var image = new Image();
+      image.onerror = function(){ loadFailed(seq, brokenText); };
+      image.onload = function(){
+        if (seq !== loadSeq) return;
+        if (onLoaded) onLoaded();
+        imgEl = image;
+        fileName = newName;
+        natural = { w: image.naturalWidth, h: image.naturalHeight };
+        imgTag.src = src;
+        $("fileName").textContent = fullName || newName;
+        $("fileName").title = fullName || newName;
+        $("fileSize").textContent = natural.w + " × " + natural.h;
+
+        ready = true;
+        if (firstOpen){
+          focusMode = true;
+          cropActive = true;
+        }
+        updateChromeVisibility();
+
+        zoom = 1;
+        baseScale = computeBaseScale();
+        resizeStageTo(baseScale * zoom);
+        offX = offY = 0;
+        clampOffsets();
+
+        box = fitBox(display.w, display.h, targetW / targetH);
+        applyTransform();
+        renderBox();
+        updateCropVisibility();
+        downloadBtn.disabled = false;
+        if (firstOpen && !focusHintShown){
+          focusHintShown = true;
+          showHint("Esc — рамка и настройки размера");
+        }
+      };
+      image.src = src;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function baseName(path){ return path.split(/[\\/]/).pop(); }
+  function baseNameNoExt(path){ return baseName(path).replace(/\.[^.]+$/, ""); }
+
+  // Load a file by absolute path via the Rust side (used for the file the
+  // OS handed us on launch, and for Prev/Next navigation). `index` is the
+  // file's position in `siblings`; it becomes current only once the image
+  // has actually loaded, so a failed load never moves the counter.
+  function loadFromPath(path, index){
+    if (!tauri) return;
+    var seq = ++loadSeq;
+    tauri.core.invoke("read_file_bytes", { path: path }).then(function(res){
+      if (seq !== loadSeq) return;
+      var bytes = Uint8Array.from(atob(res.base64), function(c){ return c.charCodeAt(0); });
+      var blob = new Blob([bytes], { type: res.mime });
+      blob.name = baseName(path);
+      loadFile(blob, baseNameNoExt(path), function(){
+        currentPath = path;
+        if (typeof index === "number") siblingIndex = navIndex = index;
+        updateNavButtons();
+      });
+    }).catch(function(err){
+      console.error("read_file_bytes failed", err);
+      loadFailed(seq, "Не удалось открыть «" + baseNameNoExt(path) + "»: " + err);
+    });
+  }
+
+  function clearSiblings(){
+    currentPath = null;
+    siblings = [];
+    siblingIndex = navIndex = -1;
+  }
+
+  function initSiblings(path){
+    if (!tauri) return;
+    tauri.core.invoke("list_siblings", { path: path }).then(function(list){
+      siblings = list;
+      siblingIndex = navIndex = siblings.indexOf(path);
+      updateNavButtons();
+    }).catch(function(){
+      clearSiblings();
+      updateNavButtons();
+    });
+  }
+
+  function updateNavButtons(){
+    var has = siblings.length > 1 && siblingIndex >= 0;
+    navRow.hidden = !has;
+    if (!has) return;
+    prevBtn.disabled = siblingIndex <= 0;
+    nextBtn.disabled = siblingIndex >= siblings.length - 1;
+    navPos.textContent = (siblingIndex + 1) + " / " + siblings.length;
+  }
+
+  // Считаем от navIndex (куда уже едем), а не от siblingIndex (что на
+  // экране): так два быстрых нажатия → уходят на два файла вперёд.
+  function goSibling(delta){
+    var next = navIndex + delta;
+    if (next < 0 || next >= siblings.length) return;
+    navIndex = next;
+    loadFromPath(siblings[next], next);
+  }
+
+  function openLocalFile(file){
+    if (!file) return;
+    clearSiblings();
+    loadFile(file);
+    updateNavButtons();
+  }
+
+  // ---------- перетаскивание рамки ----------
+
+  function getPoint(e, rect){
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function startDrag(e, mode, corner){
+    e.preventDefault();
+    e.stopPropagation();
+    closePops();
+    var rect = stage.getBoundingClientRect();
+    var start = getPoint(e, rect);
+    dragState = { mode: mode, corner: corner, start: start, box: { x:box.x, y:box.y, w:box.w, h:box.h } };
+    // Захват указателя: pointerup придёт, даже если кнопку отпустили за окном
+    e.currentTarget.setPointerCapture(e.pointerId);
+    cropBox.classList.add("drag");
+
+    function onMove(ev){
+      var p = getPoint(ev, rect);
+      var dx = p.x - dragState.start.x;
+      var dy = p.y - dragState.start.y;
+      var b0 = dragState.box;
+
+      if (dragState.mode === "move"){
+        box = {
+          x: clamp(b0.x + dx, 0, display.w - b0.w),
+          y: clamp(b0.y + dy, 0, display.h - b0.h),
+          w: b0.w, h: b0.h
+        };
+        renderBox();
+        return;
+      }
+
+      var aspect = targetW / targetH;
+      var anchorX, anchorY, growX, growY;
+      switch (dragState.corner){
+        case "br": anchorX=b0.x; anchorY=b0.y; growX=1; growY=1; break;
+        case "bl": anchorX=b0.x+b0.w; anchorY=b0.y; growX=-1; growY=1; break;
+        case "tr": anchorX=b0.x; anchorY=b0.y+b0.h; growX=1; growY=-1; break;
+        case "tl": anchorX=b0.x+b0.w; anchorY=b0.y+b0.h; growX=-1; growY=-1; break;
+        default: return;
+      }
+
+      var rawW = Math.abs(p.x - anchorX);
+      var rawH = Math.abs(p.y - anchorY);
+      var w = Math.max(rawW, rawH * aspect);
+
+      var maxW = growX === 1 ? display.w - anchorX : anchorX;
+      var maxH = growY === 1 ? display.h - anchorY : anchorY;
+
+      w = clamp(w, MIN_BOX, Math.max(maxW, MIN_BOX));
+      var h = w / aspect;
+      if (h > maxH){
+        h = Math.max(maxH, MIN_BOX / aspect);
+        w = h * aspect;
+      }
+
+      var x = growX === 1 ? anchorX : anchorX - w;
+      var y = growY === 1 ? anchorY : anchorY - h;
+
+      box = { x:x, y:y, w:w, h:h };
+      renderBox();
+    }
+
+    function onUp(){
+      cropBox.classList.remove("drag");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }
+
+  // ---------- сохранение ----------
+
+  function fallbackBrowserSave(canvas, mime, suggested){
+    canvas.toBlob(function(blob){
+      if (!blob) return;
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = suggested;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, mime, format === "jpeg" ? quality : undefined);
+  }
+
+  function download(){
+    if (!imgEl || !box) return;
+
+    // В файл уходит ровно то, что в рамке, поэтому без видимой рамки не
+    // сохраняем: сначала показываем её (выходим из фокуса), сохраняет
+    // следующее нажатие.
+    if (!cropActive || focusMode){
+      enableCrop();
+      return;
+    }
+
+    var scale = display.scale;
+    var sx = box.x / scale, sy = box.y / scale, sw = box.w / scale, sh = box.h / scale;
+
+    var canvas = document.createElement("canvas");
+    canvas.width = targetW; canvas.height = targetH;
+    var ctx = canvas.getContext("2d");
+    if (format === "jpeg"){
+      // В JPEG нет альфа-канала: без подложки прозрачные места станут чёрными
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, targetW, targetH);
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, targetW, targetH);
+
+    var mime = format === "png" ? "image/png" : "image/jpeg";
+    var ext = format === "png" ? "png" : "jpg";
+    var suggested = (fileName || "image") + "_" + targetW + "x" + targetH + "." + ext;
+
+    // Prefer the native "Save As" dialog (Rust writes the bytes to disk).
+    // Only if the dialog itself is unavailable do we fall back to a
+    // browser-style download. A failed write to the path the user picked is
+    // reported instead — silently saving somewhere else would hide it.
+    if (tauri && tauri.dialog && tauri.dialog.save) {
+      tauri.dialog.save({
+        defaultPath: suggested,
+        filters: [{ name: ext.toUpperCase(), extensions: [ext] }]
+      }).then(function(chosenPath){
+        if (!chosenPath) return; // user cancelled
+        var dataUrl = canvas.toDataURL(mime, format === "jpeg" ? quality : undefined);
+        var base64 = dataUrl.split(",")[1];
+        tauri.core.invoke("write_file_bytes", { path: chosenPath, dataBase64: base64 }).then(function(){
+          showHint("Сохранено: " + baseName(chosenPath));
+        }, function(err){
+          console.error("write_file_bytes failed", err);
+          showNotice("Не удалось сохранить файл: " + err);
+        });
+      }, function(err){
+        console.error("save dialog failed, falling back", err);
+        fallbackBrowserSave(canvas, mime, suggested);
+      });
+    } else {
+      fallbackBrowserSave(canvas, mime, suggested);
+    }
+  }
+
+  // ---------- режимы ----------
+
+  // Фокус: только изображение. Строка статуса проявляется при наведении,
+  // рамка, размерные линии и пилюля скрыты.
+  function updateChromeVisibility(){
+    document.body.classList.toggle("ready", ready);
+    document.body.classList.toggle("focusMode", focusMode);
+    focusToggleBtn.classList.toggle("on", focusMode);
+    focusToggleBtn.setAttribute("aria-pressed", String(focusMode));
+    if (focusMode) closePops();
+    updateCropVisibility();
+  }
+
+  function setFocus(on){
+    if (!ready || focusMode === on) return;
+    focusMode = on;
+    if (!on){
+      cropActive = true;          // вышли из фокуса — сразу видно, что уйдёт в файл
+      hint.style.display = "none";
+    }
+    updateChromeVisibility();
+    recomputeBaseScale();
+  }
+
+  function toggleCrop(){
+    if (!ready) return;
+    if (cropActive && !focusMode){ cropActive = false; updateCropVisibility(); }
+    else enableCrop();
+  }
+
+  // ---------- поповеры ----------
+
+  var openAnchor = null;
+  function openPop(pop, btn){
+    var wasOpen = pop.classList.contains("open");
+    closePops();
+    if (wasOpen) return;
+    pop.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
+    openAnchor = btn;
+    placePop(pop, btn);
+  }
+  // Поповер всегда над пилюлей и никогда не выходит за верх окна: высота
+  // ограничена свободным местом, остаток прокручивается внутри.
+  function placePop(pop, btn){
+    var r = btn.getBoundingClientRect(), above = pill.getBoundingClientRect().top;
+    pop.style.maxHeight = Math.max(120, above - GAP * 2) + "px";
+    var pw = pop.offsetWidth, ph = pop.offsetHeight;
+    pop.style.left = clamp(r.left + r.width / 2 - pw / 2, GAP, window.innerWidth - pw - GAP) + "px";
+    pop.style.top = Math.max(GAP, above - ph - GAP) + "px";
+  }
+  function closePops(){
+    document.querySelectorAll(".pop.open").forEach(function(p){ p.classList.remove("open"); });
+    document.querySelectorAll("[aria-expanded]").forEach(function(b){ b.setAttribute("aria-expanded", "false"); });
+    openAnchor = null;
+  }
+  function replaceOpenPop(){
+    var p = document.querySelector(".pop.open");
+    if (p && openAnchor) placePop(p, openAnchor);
+  }
+
+  // --- wire up events ---
+  $("dropCard").addEventListener("click", function(){ fileInput.click(); });
+  $("dropCard").addEventListener("keydown", function(e){
+    if (e.key === "Enter" || e.key === " "){ e.preventDefault(); fileInput.click(); }
+  });
+  $("openBtn").addEventListener("click", function(){ fileInput.click(); });
+  fileInput.addEventListener("change", function(e){
+    if (e.target.files && e.target.files[0]) openLocalFile(e.target.files[0]);
+    fileInput.value = "";
+  });
+
+  // Файл можно бросить в любое место окна — и на пустой экран, и поверх открытого.
+  var dragDepth = 0;
+  function hasFiles(e){
+    var t = e.dataTransfer && e.dataTransfer.types;
+    return !!t && Array.prototype.indexOf.call(t, "Files") >= 0;
+  }
+  window.addEventListener("dragenter", function(e){
+    if (!hasFiles(e)) return;
+    dragDepth++;
+    $("dropHint").classList.add("on");
+  });
+  window.addEventListener("dragleave", function(){
+    if (--dragDepth <= 0){ dragDepth = 0; $("dropHint").classList.remove("on"); }
+  });
+  window.addEventListener("dragover", function(e){ e.preventDefault(); });
+  window.addEventListener("drop", function(e){
+    e.preventDefault();
+    dragDepth = 0;
+    $("dropHint").classList.remove("on");
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) openLocalFile(e.dataTransfer.files[0]);
+  });
+
+  cropBox.addEventListener("pointerdown", function(e){
+    if (e.button !== 0) return;   // средняя/правая — пусть уходят на пан
+    if (e.target.classList.contains("handle")) return;
+    startDrag(e, "move");
+  });
+  cropBox.querySelectorAll(".handle").forEach(function(h){
+    h.addEventListener("pointerdown", function(e){
+      if (e.button !== 0) return;
+      startDrag(e, "resize", h.getAttribute("data-corner"));
+    });
+  });
+
+  // Пустое поле (стёрли, чтобы набрать новое число) размер не меняет.
+  // Значение вне 1…8000 сразу исправляется в самом поле, чтобы там было
+  // то же число, что уйдёт в файл. Ушли из пустого поля — возвращаем текущее.
+  function readDimInput(input){
+    var typed = parseInt(input.value, 10);
+    if (isNaN(typed)) return null;
+    var v = clamp(typed, 1, 8000);
+    if (v !== typed) input.value = v;
+    return v;
+  }
+  function wireDimInput(input, isW){
+    input.addEventListener("input", function(){
+      var v = readDimInput(input);
+      if (v === null) return;
+      if (isW) targetW = v; else targetH = v;
+      onTargetChanged();
+      enableCrop();
+    });
+    input.addEventListener("change", function(){ input.value = isW ? targetW : targetH; });
+    input.addEventListener("keydown", function(e){
+      if (e.key === "Enter" || e.key === "Escape") input.blur();
+    });
+  }
+  wireDimInput(inputW, true);
+  wireDimInput(inputH, false);
+
+  document.querySelectorAll(".fmt").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      format = btn.getAttribute("data-fmt");
+      document.querySelectorAll(".fmt").forEach(function(b){ b.classList.toggle("active", b === btn); });
+      qualityRow.hidden = format !== "jpeg";
+      $("fmtHint").textContent = format === "jpeg"
+        ? "Файл меньше; прозрачные места станут белыми"
+        : "Без потерь, прозрачность сохраняется";
+      updateFormatLabel();
+    });
+  });
+  function updateFormatLabel(){
+    $("fmtLbl").textContent = format === "png" ? "PNG" : "JPEG " + Math.round(quality * 100);
+  }
+
+  qualityRange.addEventListener("input", function(){
+    quality = parseFloat(qualityRange.value);
+    qualityLabel.textContent = Math.round(quality * 100);
+    updateFormatLabel();
+  });
+
+  $("ratioBtn").addEventListener("click", function(e){ e.stopPropagation(); openPop($("ratioPop"), $("ratioBtn")); });
+  $("fmtBtn").addEventListener("click", function(e){ e.stopPropagation(); openPop($("fmtPop"), $("fmtBtn")); });
+  document.addEventListener("pointerdown", function(e){
+    if (!e.target.closest(".pop, .pbtn")) closePops();
+  });
+  // Содержимое поповера меняется (JPEG → ползунок качества) — пересчитываем
+  // позицию, иначе выросший поповер наезжает на пилюлю.
+  if (window.ResizeObserver){
+    var popObserver = new ResizeObserver(replaceOpenPop);
+    document.querySelectorAll(".pop").forEach(function(p){ popObserver.observe(p); });
+  }
+
+  downloadBtn.addEventListener("click", download);
+  cropToggleBtn.addEventListener("click", toggleCrop);
+  focusToggleBtn.addEventListener("click", function(){ setFocus(!focusMode); });
+  $("zoomBtn").addEventListener("click", function(){
+    if (Math.abs(display.scale - 1) < 0.01) fitToWindow(); else actualSize();
+  });
+  $("helpBtn").addEventListener("click", function(){ help.classList.add("open"); });
+  help.addEventListener("click", function(e){ if (e.target === help) help.classList.remove("open"); });
+
+  flipBtn.addEventListener("click", function(){ setTarget(targetH, targetW); });
+
+  prevBtn.addEventListener("click", function(){ goSibling(-1); });
+  nextBtn.addEventListener("click", function(){ goSibling(1); });
+
+  // Mouse-wheel zoom: scroll up zooms in, scroll down zooms out, centred on
+  // the cursor.
+  viewport.addEventListener("wheel", function(e){
+    if (!ready) return;
+    e.preventDefault();
+    setZoom(zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), e.clientX, e.clientY);
+  }, { passive: false });
+
+  // Пан: ЛКМ по картинке вне рамки (внутри рамки ЛКМ двигает саму рамку),
+  // в фокусе — везде. Средняя кнопка панорамирует всегда.
+  stage.addEventListener("pointerdown", function(e){
+    if (!ready) return;
+    var middle = e.button === 1;
+    if (!middle && e.button !== 0) return;
+    if (!middle && !focusMode && cropActive && cropBox.contains(e.target)) return;
+    e.preventDefault();
+    closePops();
+    var lastX = e.clientX, lastY = e.clientY;
+    stage.classList.add("panning");
+    stage.setPointerCapture(e.pointerId);
+
+    function onMove(ev){
+      panBy(ev.clientX - lastX, ev.clientY - lastY);
+      lastX = ev.clientX;
+      lastY = ev.clientY;
+    }
+    function onUp(){
+      stage.classList.remove("panning");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  });
+
+  // Без этого средний клик в WebView2 включает нативный автоскролл
+  stage.addEventListener("auxclick", function(e){ if (e.button === 1) e.preventDefault(); });
+
+  window.addEventListener("resize", function(){
+    recomputeBaseScale();
+    replaceOpenPop();
+  });
+
+  var NUDGE = { ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1] };
+  document.addEventListener("keydown", function(e){
+    var key = e.key, low = key.toLowerCase();
+    // Ctrl+S / Ctrl+O работают и из полей ввода (ы/щ — русская раскладка)
+    if (e.ctrlKey && !e.altKey && (low === "s" || low === "ы")){ e.preventDefault(); download(); return; }
+    if (e.ctrlKey && !e.altKey && (low === "o" || low === "щ")){ e.preventDefault(); fileInput.click(); return; }
+
+    var tag = document.activeElement && document.activeElement.tagName;
+    if (tag === "INPUT") return;
+
+    if (key === "Escape"){
+      if (help.classList.contains("open")){ help.classList.remove("open"); return; }
+      if (document.querySelector(".pop.open")){ closePops(); return; }
+      setFocus(false);
+      return;
+    }
+    if (key === "?" || (key === "," && e.shiftKey)){ help.classList.toggle("open"); return; }
+    if (!ready || e.altKey || e.metaKey) return;
+
+    if (e.shiftKey && NUDGE[key] && cropActive && !focusMode){
+      e.preventDefault();
+      var step = e.ctrlKey ? 10 : 1;
+      nudge(NUDGE[key][0] * step, NUDGE[key][1] * step);
+      return;
+    }
+    if (e.ctrlKey) return;   // Ctrl+C и т.п. — не наше
+
+    if (key === "ArrowLeft" && !prevBtn.disabled && !navRow.hidden) goSibling(-1);
+    else if (key === "ArrowRight" && !nextBtn.disabled && !navRow.hidden) goSibling(1);
+    else if (low === "c" || low === "с") toggleCrop();
+    else if (low === "f" || low === "а") setFocus(!focusMode);
+    else if (low === "x" || low === "ч") setTarget(targetH, targetW);
+    else if (key === "0") fitToWindow();
+    else if (key === "1") actualSize();
+  });
+
+  onTargetChanged();
+  updateChromeVisibility();
+
+  // If launched by double-clicking / "Open with" a jpg/jpeg/png, Rust hands
+  // us that file's path here; otherwise the empty screen (drop or pick a
+  // file) is the entry point, same as the web version.
+  if (tauri){
+    tauri.core.invoke("get_initial_file").then(function(path){
+      if (!path) return;
+      loadFromPath(path);
+      initSiblings(path);
+    }).catch(function(err){ console.error("get_initial_file failed", err); });
+  }
+})();
+</script>
+</body>
+</html>

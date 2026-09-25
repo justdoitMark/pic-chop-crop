@@ -1,0 +1,13 @@
+{
+  "name": "pic-chop-crop",
+  "version": "1.2.0",
+  "private": true,
+  "scripts": {
+    "tauri": "tauri",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tauri-apps/cli": "^2"
+  }
+}

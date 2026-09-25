@@ -1,0 +1,41 @@
+name: test
+
+# Прогоняется на каждый push и pull request. Отдельно от release.yml, чтобы
+# сломанный код ловился до того, как на него поставят тег.
+on:
+  push:
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Браузер не качаем: тесты гоняются в Edge, он на раннере уже есть.
+      - run: npm install
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      - run: npm test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: test-results/
+
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # generate_context! требует иконки уже при компиляции тестов
+      - run: node scripts/generate-icons.mjs
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
