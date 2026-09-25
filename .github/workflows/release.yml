@@ -1,7 +1,7 @@
 name: release
 
 # Два способа собрать релиз:
-#   1. Тег:      git tag v1.1.0 && git push --tags
+#   1. Тег:      git tag v0.1.0 && git push --tags
 #   2. Вручную:  вкладка Actions -> release -> "Run workflow", вписать версию
 #      (работает и из мобильного приложения GitHub, без git и без ПК)
 on:
@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Версия релиза, например v1.1.0'
+        description: 'Версия релиза, например v0.1.0'
         required: true
-        default: 'v1.2.0'
+        default: 'v0.1.0'
 
 jobs:
   release:

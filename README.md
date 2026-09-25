@@ -80,7 +80,7 @@ npm run tauri build
 ```
 
 Инсталлятор появится в
-`src-tauri\target\release\bundle\nsis\Pic Chop Crop_1.2.0_x64-setup.exe`.
+`src-tauri\target\release\bundle\nsis\Pic Chop Crop_0.1.0_x64-setup.exe`.
 Запусти его — он ставит файловые ассоциации для jpg/jpeg/png сам, но Windows
 может всё равно попросить подтвердить вручную (тот же флоу "Открыть с
 помощью", что мы уже проходили).
