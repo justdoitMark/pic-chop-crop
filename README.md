@@ -80,7 +80,7 @@ npm run tauri build
 ```
 
 Инсталлятор появится в
-`src-tauri\target\release\bundle\nsis\Pic Chop Crop_0.1.0_x64-setup.exe`.
+`src-tauri\target\release\bundle\nsis\Pic Chop Crop_0.1.1_x64-setup.exe`.
 Запусти его — он ставит файловые ассоциации для jpg/jpeg/png сам, но Windows
 может всё равно попросить подтвердить вручную (тот же флоу "Открыть с
 помощью", что мы уже проходили).
@@ -116,6 +116,12 @@ npm run tauri build
 
 ## Если что-то не работает
 
+- **Установщик: "Error opening file for writing: C:\Program Files\Pic Chop Crop\…"** —
+  так вела себя версия 0.1.0: она ставилась в Program Files и без прав
+  администратора не могла туда писать. Начиная с 0.1.1 программа ставится
+  "только для меня" в `%LOCALAPPDATA%\Pic Chop Crop` и прав администратора
+  не просит. Для 0.1.0: Abort → правый клик по установщику → "Запуск от
+  имени администратора".
 - **Окно открывается, но пусто / кнопки не реагируют** — открой DevTools
   (правый клик → Inspect в dev-сборке) и посмотри консоль. Скорее всего не
   хватает прав в `src-tauri/capabilities/default.json` (`core:default` +
