@@ -333,10 +333,40 @@ mod tests {
     }
 }
 
+/// Windows lists every file opened through the file association under
+/// "Recent" in the taskbar icon's Jump List. Publishing our own empty Jump
+/// List (without the Recent category) hides it, and RemoveAllDestinations
+/// wipes the history Windows has already recorded for the app. Runs on its
+/// own thread: COM set-up there can't interfere with WebView2's main thread.
+#[cfg(windows)]
+fn clear_recent_files() {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::Common::IObjectArray;
+    use windows::Win32::UI::Shell::{ApplicationDestinations, DestinationList, IApplicationDestinations, ICustomDestinationList};
+
+    std::thread::spawn(|| unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if let Ok(history) = CoCreateInstance::<_, IApplicationDestinations>(&ApplicationDestinations, None, CLSCTX_INPROC_SERVER) {
+            let _ = history.RemoveAllDestinations();
+        }
+        if let Ok(list) = CoCreateInstance::<_, ICustomDestinationList>(&DestinationList, None, CLSCTX_INPROC_SERVER) {
+            let mut min_slots = 0u32;
+            if list.BeginList::<IObjectArray>(&mut min_slots).is_ok() {
+                let _ = list.CommitList();
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn clear_recent_files() {}
+
 /// Another launch (a second "Open with", or the tray): open its file in the
 /// already-running window. The page reloads for a clean state and calls
 /// app_ready once the image is drawn, which shows the window.
 fn activate(app: &AppHandle, file: Option<String>) {
+    // Explorer records every "Open with" again, so clear it on each one.
+    clear_recent_files();
     let Some(window) = app.get_webview_window("main") else { return };
     if file.is_none() && window.is_visible().unwrap_or(false) {
         let _ = window.unminimize();
@@ -398,7 +428,10 @@ fn main() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .manage(launch)
-        .setup(|app| Ok(build_tray(app)?))
+        .setup(|app| {
+            clear_recent_files();
+            Ok(build_tray(app)?)
+        })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
