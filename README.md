@@ -86,7 +86,7 @@ npm run tauri build
 ```
 
 Инсталлятор появится в
-`src-tauri\target\release\bundle\nsis\Pic Chop Crop_0.1.4_x64-setup.exe`.
+`src-tauri\target\release\bundle\nsis\Pic Chop Crop_0.1.5_x64-setup.exe`.
 Запусти его — по умолчанию он ставит программу в
 `C:\Program Files\Pic Chop Crop` (для всех пользователей), поэтому Windows
 сначала спросит права администратора. Файловые ассоциации для jpg/jpeg/png он
