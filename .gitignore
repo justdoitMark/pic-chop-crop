@@ -15,3 +15,7 @@ src-tauri/icons/64x64.png
 
 # local session notes of the "remember" Claude plugin
 .remember/
+
+# local Rust build output
+src-tauri/Cargo.lock
+src-tauri/gen/

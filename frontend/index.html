@@ -5,8 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pic Chop Crop — локальный обрезчик изображений</title>
 <script>
-  // В десктопе стартовый экран скрыт до ответа get_initial_file (см. endBoot).
-  if (window.__TAURI__) document.documentElement.className = "booting";
+  // В десктопе стартовый экран скрыт до ответа get_initial_file (см. endBoot),
+  // а сам файл запрашивается уже здесь, не дожидаясь разбора всей страницы.
+  if (window.__TAURI__){
+    document.documentElement.className = "booting";
+    window.__launch = window.__TAURI__.core.invoke("get_initial_file").then(function(path){
+      return path ? { path: path, bytes: window.__TAURI__.core.invoke("read_file_bytes", { path: path }) } : null;
+    });
+  }
 </script>
 <style>
   /* Подложка вокруг фото — нейтральный графит: цветной фон искажает восприятие
@@ -706,7 +712,15 @@
   // реально на экране, а пользователь видит, что случилось.
   // Стартовый экран спрятан, пока не ясно, открывается ли файл из "Открыть с
   // помощью" (класс booting ставится в <head>); иначе он мелькает перед фото.
-  function endBoot(){ document.documentElement.classList.remove("booting"); }
+  // Окно, запущенное повторно через "Открыть с помощью", скрыто, пока грузится
+  // картинка; app_ready показывает его уже с ней.
+  var booted = false;
+  function endBoot(){
+    if (booted) return;
+    booted = true;
+    document.documentElement.classList.remove("booting");
+    if (tauri) tauri.core.invoke("app_ready").catch(function(err){ console.error("app_ready failed", err); });
+  }
 
   function loadFailed(seq, text){
     endBoot();
@@ -727,15 +741,13 @@
     var newName = name || (file.name ? file.name.replace(/\.[^.]+$/, "") : "");
     var firstOpen = !ready;   // при первом открытии сразу входим в режим фокуса
     var brokenText = "Не удалось открыть «" + (newName || "файл") + "» — файл повреждён или это не изображение";
-    // Blob URL, а не data URL: без перекодирования мегабайтов в base64-строку,
-    // и <img> на экране берёт уже декодированную картинку по тому же URL.
+    // Blob URL, а не data URL: без перекодирования мегабайтов в base64-строку.
+    // decode() распаковывает пиксели вне основного потока, и на экран встаёт
+    // этот же элемент — второй раз картинка не декодируется.
     var src = URL.createObjectURL(file);
     var image = new Image();
-    image.onerror = function(){
-      URL.revokeObjectURL(src);
-      loadFailed(seq, brokenText);
-    };
-    image.onload = function(){
+    image.src = src;
+    image.decode().then(function(){
       if (seq !== loadSeq){ URL.revokeObjectURL(src); return; }
       if (onLoaded) onLoaded();
       if (imgUrl) URL.revokeObjectURL(imgUrl);
@@ -743,8 +755,11 @@
       imgEl = image;
       fileName = newName;
       natural = { w: image.naturalWidth, h: image.naturalHeight };
-      imgTag.src = src;
-      endBoot();
+      image.id = "img";
+      image.alt = "";
+      image.draggable = false;
+      imgTag.replaceWith(image);
+      imgTag = image;
       $("fileName").textContent = fullName || newName;
       $("fileName").title = fullName || newName;
       $("fileSize").textContent = natural.w + " × " + natural.h;
@@ -771,8 +786,11 @@
         focusHintShown = true;
         showHint("Esc — рамка и настройки размера");
       }
-    };
-    image.src = src;
+      endBoot();
+    }, function(){
+      URL.revokeObjectURL(src);
+      loadFailed(seq, brokenText);
+    });
   }
 
   function baseName(path){ return path.split(/[\\/]/).pop(); }
@@ -782,10 +800,10 @@
   // OS handed us on launch, and for Prev/Next navigation). `index` is the
   // file's position in `siblings`; it becomes current only once the image
   // has actually loaded, so a failed load never moves the counter.
-  function loadFromPath(path, index){
+  function loadFromPath(path, index, bytesPromise){
     if (!tauri) return;
     var seq = ++loadSeq;
-    tauri.core.invoke("read_file_bytes", { path: path }).then(function(bytes){
+    (bytesPromise || tauri.core.invoke("read_file_bytes", { path: path })).then(function(bytes){
       if (seq !== loadSeq) return;
       // Rust отдаёт сырые байты (ArrayBuffer); тип — по расширению, Rust
       // пропускает только jpg/jpeg/png.
@@ -1257,13 +1275,14 @@
   updateChromeVisibility();
 
   // If launched by double-clicking / "Open with" a jpg/jpeg/png, Rust hands
-  // us that file's path here; otherwise the empty screen (drop or pick a
-  // file) is the entry point, same as the web version.
+  // us that file's path (and its bytes are already on the way, requested in
+  // <head>); otherwise the empty screen (drop or pick a file) is the entry
+  // point, same as the web version.
   if (tauri){
-    tauri.core.invoke("get_initial_file").then(function(path){
-      if (!path) return endBoot();
-      loadFromPath(path);
-      initSiblings(path);
+    window.__launch.then(function(launch){
+      if (!launch) return endBoot();
+      loadFromPath(launch.path, undefined, launch.bytes);
+      initSiblings(launch.path);
     }).catch(function(err){
       endBoot();
       console.error("get_initial_file failed", err);

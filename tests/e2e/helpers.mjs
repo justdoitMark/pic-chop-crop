@@ -103,6 +103,8 @@ export async function installTauriMock(page, opts) {
               return Promise.resolve(cfg.initialFile);
             case "list_siblings":
               return Promise.resolve(cfg.siblings);
+            case "app_ready":
+              return Promise.resolve(null);
             case "read_file_bytes": {
               const f = cfg.files[args.path];
               if (!f) return Promise.reject("not found: " + args.path);

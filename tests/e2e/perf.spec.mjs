@@ -38,6 +38,29 @@ test("the start screen still appears when launched without a file", async ({ pag
   await installTauriMock(page, { initialFile: null });
   await page.goto(APP_URL);
   await expect(page.locator("#dropzone")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__mockLog.invokes.filter((i) => i.cmd === "app_ready").length)).toBe(1);
+});
+
+// A relaunch reloads the page in a hidden window; app_ready shows it, so it
+// must come after the image is decoded and laid out, exactly once.
+test("app_ready is sent once, after the launch image is ready", async ({ page }) => {
+  await installTauriMock(page, { initialFile: A, siblings: [A], files: { [A]: { raw: PHOTO, delayMs: 200 } } });
+  await page.addInitScript(() => {
+    window.__imgAtReady = null;
+    const orig = window.__TAURI__.core.invoke;
+    window.__TAURI__.core.invoke = (cmd, args) => {
+      if (cmd === "app_ready" && window.__imgAtReady === null) {
+        const img = document.getElementById("img");
+        window.__imgAtReady = { w: img.naturalWidth, complete: img.complete, inDom: document.body.contains(img) };
+      }
+      return orig(cmd, args);
+    };
+  });
+  await page.goto(APP_URL);
+  await waitForImage(page, W, H);
+  await expect.poll(() => page.evaluate(() => window.__imgAtReady)).toEqual({ w: W, complete: true, inDom: true });
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => window.__mockLog.invokes.filter((i) => i.cmd === "app_ready").length)).toBe(1);
 });
 
 test("the start screen appears if the launch file fails to open", async ({ page }) => {
