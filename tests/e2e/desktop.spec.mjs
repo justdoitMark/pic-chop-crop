@@ -27,12 +27,13 @@ test.describe("opening a file", () => {
     await expect(page.locator("#cropBox")).toBeHidden();
     await expect(page.locator("#fileName")).toHaveText("a.png");
     await expect(page.locator("#fileSize")).toHaveText("800 × 600");
-    await expect(page.locator("#hint")).toBeVisible();
+    // The "Esc — рамка…" hint is switched off (SHOW_FOCUS_HINT) for now.
+    await page.waitForTimeout(300);
+    await expect(page.locator("#hint")).toBeHidden();
 
     await page.keyboard.press("c");
     await expect(page.locator("#cropBox")).toBeVisible();
     await expect(page.locator("body")).not.toHaveClass(/focusMode/);
-    await expect(page.locator("#hint")).toBeHidden();
   });
 });
 

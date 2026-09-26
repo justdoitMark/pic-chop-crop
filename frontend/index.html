@@ -393,6 +393,9 @@
   var focusMode = false;
   var cropActive = true;    // рамка видна всегда, когда не включён фокус (C — скрыть)
   var focusHintShown = false;
+  // Подсказка «Esc — рамка…» при первом открытии. Временно выключена по
+  // просьбе пользователя на время тестирования; true — вернуть.
+  var SHOW_FOCUS_HINT = false;
 
   function $(id){ return document.getElementById(id); }
   var dropzone = $("dropzone"), fileInput = $("fileInput"), stage = $("stage"), imgTag = $("img");
@@ -782,7 +785,7 @@
       renderBox();
       updateCropVisibility();
       downloadBtn.disabled = false;
-      if (firstOpen && !focusHintShown){
+      if (SHOW_FOCUS_HINT && firstOpen && !focusHintShown){
         focusHintShown = true;
         showHint("Esc — рамка и настройки размера");
       }
