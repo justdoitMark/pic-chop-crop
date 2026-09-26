@@ -33,9 +33,4 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      # generate_context! требует иконки уже при компиляции тестов
-      - run: node scripts/generate-icons.mjs
       - run: cargo test --manifest-path src-tauri/Cargo.toml

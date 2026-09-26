@@ -13,7 +13,7 @@ on:
       version:
         description: 'Версия релиза, например v0.1.0'
         required: true
-        default: 'v0.1.1'
+        default: 'v0.1.2'
 
 jobs:
   release:
@@ -44,9 +44,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm install
-
-      - name: Generate placeholder app icons
-        run: node scripts/generate-icons.mjs
 
       - uses: tauri-apps/tauri-action@v0
         env:

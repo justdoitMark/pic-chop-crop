@@ -10,7 +10,7 @@ Pic Chop Crop (formerly Exact Crop) is a Windows desktop image cropper built on 
 
 ```powershell
 npm install
-node scripts/generate-icons.mjs   # required once: src-tauri/icons/ is NOT committed; the build fails without it
+node scripts/generate-icons.mjs   # only after replacing src-tauri/app-icon.png; regenerates the committed src-tauri/icons/
 npm run tauri dev                 # live run
 npm run tauri build               # NSIS installer -> src-tauri/target/release/bundle/nsis/
 ```
@@ -20,7 +20,7 @@ npm run tauri build               # NSIS installer -> src-tauri/target/release/b
 ```powershell
 npm test                                         # Playwright E2E, ~10 s, no GUI needed
 npx playwright test -g "JPEG"                    # single test by name
-cargo test --manifest-path src-tauri/Cargo.toml  # Rust unit tests (needs icons generated first)
+cargo test --manifest-path src-tauri/Cargo.toml  # Rust unit tests
 ```
 
 - **E2E** (`tests/e2e/`): opens `frontend/index.html` from disk in headless Edge. Edge uses the same Chromium engine as WebView2, so no browser download is needed; install with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`.
@@ -53,6 +53,6 @@ Prereqs: Rust ≥ 1.77 via rustup, VS Build Tools with "Desktop development with
 
 ## Releases and versioning
 
-- `.github/workflows/release.yml` builds on `windows-latest` with `tauri-action`. It runs on a `v*.*.*` tag push or on a manual `workflow_dispatch` with a version input, and it runs `generate-icons.mjs` before the build.
+- `.github/workflows/release.yml` builds on `windows-latest` with `tauri-action`. It runs on a `v*.*.*` tag push or on a manual `workflow_dispatch` with a version input. The app icons are committed in `src-tauri/icons/` (source: `src-tauri/app-icon.png`), so CI doesn't generate them.
 - The version is duplicated in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, so bump all three together.
 - The Tauri `identifier` is `com.picchopcrop.desktop` (it was `com.markbelov.exactcrop` before the rename). Changing it makes Windows treat the build as a different app: an old install is not upgraded and has to be uninstalled separately.
