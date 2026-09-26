@@ -205,6 +205,13 @@
     #navPos{ min-width:40px; }
     #bar{ gap:6px; }
   }
+  @media (max-width: 460px){
+    #pill{ gap:2px; padding:4px; }
+    #pill .div, #ratioBtn svg, .pbtn .caret{ display:none; }
+    .pbtn{ padding:0 6px; }
+    .dims input{ width:54px; font-size:13px; }
+    #downloadBtn{ padding:0 10px; margin-left:2px; }
+  }
   @media (max-width: 420px){ #ratioGrid{ grid-template-columns:repeat(3, 1fr); } }
   @media (prefers-reduced-motion: reduce){ *, *::before, *::after{ animation:none !important; transition:none !important; } }
 </style>

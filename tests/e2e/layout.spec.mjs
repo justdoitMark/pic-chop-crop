@@ -12,7 +12,9 @@ const SIZES = [
   { name: "1920x1080 @150% / 2560x1440 @200%", width: 1280, height: 640 },
   { name: "1366x768 @125%", width: 1092, height: 534 },
   { name: "2560x1440 @200% + browser zoom", width: 924, height: 480 },
-  { name: "minimum window", width: 720, height: 480 },
+  { name: "small window", width: 720, height: 480 },
+  { name: "tiny window", width: 480, height: 360 },
+  { name: "very tiny window", width: 320, height: 240 },
 ];
 
 // Returns human-readable layout violations for the current page state.
@@ -20,7 +22,8 @@ function audit() {
   const out = [];
   const W = innerWidth, H = innerHeight, T = 1;
   const R = (el) => el.getBoundingClientRect();
-  const shown = (el) => el && el.offsetParent !== null && R(el).width > 0;
+  // offsetParent is always null for position:fixed (the pill), so it can't tell hidden from shown
+  const shown = (el) => el && el.checkVisibility() && R(el).width > 0;
   const inside = (el, tag) => {
     const r = R(el);
     if (r.left < -T || r.top < -T || r.right > W + T || r.bottom > H + T)

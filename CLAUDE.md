@@ -26,7 +26,7 @@ cargo test --manifest-path src-tauri/Cargo.toml  # Rust unit tests (needs icons 
 - **E2E** (`tests/e2e/`): opens `frontend/index.html` from disk in headless Edge. Edge uses the same Chromium engine as WebView2, so no browser download is needed; install with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`.
   - `desktop.spec.mjs` fakes `window.__TAURI__` with `installTauriMock` from `helpers.mjs`. The fake serves generated PNG fixtures, supports per-file `delayMs` for race tests, and records every call in `window.__mockLog`.
   - `browser.spec.mjs` covers the no-Tauri fallback.
-  - `layout.spec.mjs` checks that nothing leaves the window (popovers, pill, dimension labels) at viewports matching common monitor × Windows-scale combinations, down to the 720×480 minimum window.
+  - `layout.spec.mjs` checks that nothing leaves the window (popovers, pill, dimension labels) at viewports matching common monitor × Windows-scale combinations, down to a 320×240 window (the window has no minimum size).
   - Set `APP_URL` to run the suite against a modified copy of the page, e.g. to confirm a test fails when a fix is reverted.
 - **Rust** (`#[cfg(test)] mod tests` in `main.rs`): calls the commands directly as plain functions, using real temp dirs.
 - **CI**: `.github/workflows/test.yml` runs both suites on every push and PR.
