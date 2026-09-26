@@ -26,6 +26,7 @@ cargo test --manifest-path src-tauri/Cargo.toml  # Rust unit tests
 - **E2E** (`tests/e2e/`): opens `frontend/index.html` from disk in headless Edge. Edge uses the same Chromium engine as WebView2, so no browser download is needed; install with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`.
   - `desktop.spec.mjs` fakes `window.__TAURI__` with `installTauriMock` from `helpers.mjs`. The fake serves generated PNG fixtures, supports per-file `delayMs` for race tests, and records every call in `window.__mockLog`.
   - `browser.spec.mjs` covers the no-Tauri fallback.
+  - `perf.spec.mjs` guards the "Open with" launch: no start-screen flash before the image (`html.booting`), and a ~2 MB PNG on screen within 400 ms of its bytes arriving. It can't measure WebView2 start-up or real IPC.
   - `layout.spec.mjs` checks that nothing leaves the window (popovers, pill, dimension labels) at viewports matching common monitor × Windows-scale combinations, down to a 320×240 window (the window has no minimum size).
   - Set `APP_URL` to run the suite against a modified copy of the page, e.g. to confirm a test fails when a fix is reverted.
 - **Rust** (`#[cfg(test)] mod tests` in `main.rs`): calls the commands directly as plain functions, using real temp dirs.
@@ -39,7 +40,7 @@ Prereqs: Rust ≥ 1.77 via rustup, VS Build Tools with "Desktop development with
 - **`frontend/index.html`** (~1250 lines) holds the whole UI: CSS, markup and one inline `<script>` in ES5 style (`var`, `function`). Layout: full-window canvas, a top status bar, and a floating bottom "pill" (ratio popover, W×H inputs, format popover, Save). That script does all the image work on a `<canvas>`: crop box, dimension lines, zoom/pan, presets, focus mode and export resampling. Files open in focus mode; leaving it shows the crop frame. The same code also runs as a plain web page. `window.__TAURI__` (enabled by `withGlobalTauri`) is feature-detected (`var tauri = window.__TAURI__ || null`), and every desktop-only path falls back to browser behavior. Keep that dual-mode contract when you edit.
 - **`src-tauri/src/main.rs`** exposes exactly four commands, called via `tauri.core.invoke`:
   - `get_initial_file`: returns `argv[1]`, which Windows passes on an "Open with" launch.
-  - `read_file_bytes`: returns base64 plus the MIME type. Only jpg/jpeg/png are allowed.
+  - `read_file_bytes`: returns the raw bytes (`tauri::ipc::Response`, an ArrayBuffer in JS; no base64/JSON, which cost ~1.4 s on a 2 MB PNG). Only jpg/jpeg/png are allowed; the frontend derives the MIME type from the extension.
   - `list_siblings`: lists the jpg/png files in the same folder, natural-sorted to match Explorer order. Prev/Next navigation uses it.
   - `write_file_bytes`: base64 → disk. The save path comes from the `tauri-plugin-dialog` save dialog.
   

@@ -10,13 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use serde::Serialize;
-
-#[derive(Serialize)]
-struct FileData {
-    base64: String,
-    mime: String,
-}
+use tauri::ipc::Response;
 
 fn mime_for(path: &Path) -> Option<&'static str> {
     match path
@@ -79,15 +73,17 @@ fn get_initial_file() -> Option<String> {
         .filter(|p| Path::new(p).is_file())
 }
 
+fn read_image(path: &str) -> Result<Vec<u8>, String> {
+    let p = Path::new(path);
+    mime_for(p).ok_or_else(|| "unsupported file type".to_string())?;
+    fs::read(p).map_err(|e| e.to_string())
+}
+
+/// Raw file bytes; the frontend receives them as an ArrayBuffer. A JSON or
+/// base64 payload would cost a multi-MB string encode + decode per image.
 #[tauri::command]
-fn read_file_bytes(path: String) -> Result<FileData, String> {
-    let p = Path::new(&path);
-    let mime = mime_for(p).ok_or_else(|| "unsupported file type".to_string())?;
-    let bytes = fs::read(p).map_err(|e| e.to_string())?;
-    Ok(FileData {
-        base64: STANDARD.encode(bytes),
-        mime: mime.to_string(),
-    })
+fn read_file_bytes(path: String) -> Result<Response, String> {
+    read_image(&path).map(Response::new)
 }
 
 /// All jpg/jpeg/png files in the same folder as `path`, natural-sorted, so
@@ -184,9 +180,7 @@ mod tests {
         let bytes: &[u8] = b"\x89PNG\r\n\x1a\nnot really a png";
 
         write_file_bytes(path.clone(), STANDARD.encode(bytes)).unwrap();
-        let data = read_file_bytes(path).unwrap();
-        assert_eq!(data.mime, "image/png");
-        assert_eq!(STANDARD.decode(data.base64).unwrap(), bytes);
+        assert_eq!(read_image(&path).unwrap(), bytes);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -195,7 +189,7 @@ mod tests {
         let dir = temp_dir("unsupported");
         let path = dir.join("pic.webp");
         fs::write(&path, b"x").unwrap();
-        assert!(read_file_bytes(path.to_string_lossy().into_owned()).is_err());
+        assert!(read_image(&path.to_string_lossy()).is_err());
         fs::remove_dir_all(dir).unwrap();
     }
 

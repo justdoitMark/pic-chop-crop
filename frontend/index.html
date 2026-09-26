@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pic Chop Crop — локальный обрезчик изображений</title>
+<script>
+  // В десктопе стартовый экран скрыт до ответа get_initial_file (см. endBoot).
+  if (window.__TAURI__) document.documentElement.className = "booting";
+</script>
 <style>
   /* Подложка вокруг фото — нейтральный графит: цветной фон искажает восприятие
      цветов снимка. Фирменный тёмно-синий — только на элементах управления.
@@ -171,7 +175,7 @@
   /* ---------- состояния ---------- */
   body:not(.ready) #fileSize, body:not(.ready) #zoomBtn, body:not(.ready) #cropToggleBtn,
   body:not(.ready) #focusToggleBtn{ display:none; }
-  body.ready #dropzone{ display:none; }
+  body.ready #dropzone, html.booting #dropzone{ display:none; }
   body.ready #workspace{ display:block; }
 
   /* Режим фокуса: только изображение. Строка статуса прозрачна и проявляется
@@ -368,6 +372,7 @@
   var fileName = "";        // имя без расширения — для имени сохраняемого файла
   var ready = false;
   var imgEl = null;         // Image() used for canvas export
+  var imgUrl = null;        // blob: URL of the image on screen, revoked on replace
   var dragState = null;
 
   var currentPath = null;   // set once a file was loaded via Tauri (not drag&drop)
@@ -699,7 +704,12 @@
 
   // Загрузка не удалась: счётчик Prev/Next возвращается к тому файлу, что
   // реально на экране, а пользователь видит, что случилось.
+  // Стартовый экран спрятан, пока не ясно, открывается ли файл из "Открыть с
+  // помощью" (класс booting ставится в <head>); иначе он мелькает перед фото.
+  function endBoot(){ document.documentElement.classList.remove("booting"); }
+
   function loadFailed(seq, text){
+    endBoot();
     if (seq !== loadSeq) return;
     navIndex = siblingIndex;
     showNotice(text);
@@ -717,50 +727,52 @@
     var newName = name || (file.name ? file.name.replace(/\.[^.]+$/, "") : "");
     var firstOpen = !ready;   // при первом открытии сразу входим в режим фокуса
     var brokenText = "Не удалось открыть «" + (newName || "файл") + "» — файл повреждён или это не изображение";
-    var reader = new FileReader();
-    reader.onerror = function(){ loadFailed(seq, brokenText); };
-    reader.onload = function(ev){
-      if (seq !== loadSeq) return;
-      var src = ev.target.result;
-      var image = new Image();
-      image.onerror = function(){ loadFailed(seq, brokenText); };
-      image.onload = function(){
-        if (seq !== loadSeq) return;
-        if (onLoaded) onLoaded();
-        imgEl = image;
-        fileName = newName;
-        natural = { w: image.naturalWidth, h: image.naturalHeight };
-        imgTag.src = src;
-        $("fileName").textContent = fullName || newName;
-        $("fileName").title = fullName || newName;
-        $("fileSize").textContent = natural.w + " × " + natural.h;
-
-        ready = true;
-        if (firstOpen){
-          focusMode = true;
-          cropActive = true;
-        }
-        updateChromeVisibility();
-
-        zoom = 1;
-        baseScale = computeBaseScale();
-        resizeStageTo(baseScale * zoom);
-        offX = offY = 0;
-        clampOffsets();
-
-        box = fitBox(display.w, display.h, targetW / targetH);
-        applyTransform();
-        renderBox();
-        updateCropVisibility();
-        downloadBtn.disabled = false;
-        if (firstOpen && !focusHintShown){
-          focusHintShown = true;
-          showHint("Esc — рамка и настройки размера");
-        }
-      };
-      image.src = src;
+    // Blob URL, а не data URL: без перекодирования мегабайтов в base64-строку,
+    // и <img> на экране берёт уже декодированную картинку по тому же URL.
+    var src = URL.createObjectURL(file);
+    var image = new Image();
+    image.onerror = function(){
+      URL.revokeObjectURL(src);
+      loadFailed(seq, brokenText);
     };
-    reader.readAsDataURL(file);
+    image.onload = function(){
+      if (seq !== loadSeq){ URL.revokeObjectURL(src); return; }
+      if (onLoaded) onLoaded();
+      if (imgUrl) URL.revokeObjectURL(imgUrl);
+      imgUrl = src;
+      imgEl = image;
+      fileName = newName;
+      natural = { w: image.naturalWidth, h: image.naturalHeight };
+      imgTag.src = src;
+      endBoot();
+      $("fileName").textContent = fullName || newName;
+      $("fileName").title = fullName || newName;
+      $("fileSize").textContent = natural.w + " × " + natural.h;
+
+      ready = true;
+      if (firstOpen){
+        focusMode = true;
+        cropActive = true;
+      }
+      updateChromeVisibility();
+
+      zoom = 1;
+      baseScale = computeBaseScale();
+      resizeStageTo(baseScale * zoom);
+      offX = offY = 0;
+      clampOffsets();
+
+      box = fitBox(display.w, display.h, targetW / targetH);
+      applyTransform();
+      renderBox();
+      updateCropVisibility();
+      downloadBtn.disabled = false;
+      if (firstOpen && !focusHintShown){
+        focusHintShown = true;
+        showHint("Esc — рамка и настройки размера");
+      }
+    };
+    image.src = src;
   }
 
   function baseName(path){ return path.split(/[\\/]/).pop(); }
@@ -773,10 +785,11 @@
   function loadFromPath(path, index){
     if (!tauri) return;
     var seq = ++loadSeq;
-    tauri.core.invoke("read_file_bytes", { path: path }).then(function(res){
+    tauri.core.invoke("read_file_bytes", { path: path }).then(function(bytes){
       if (seq !== loadSeq) return;
-      var bytes = Uint8Array.from(atob(res.base64), function(c){ return c.charCodeAt(0); });
-      var blob = new Blob([bytes], { type: res.mime });
+      // Rust отдаёт сырые байты (ArrayBuffer); тип — по расширению, Rust
+      // пропускает только jpg/jpeg/png.
+      var blob = new Blob([bytes], { type: /\.png$/i.test(path) ? "image/png" : "image/jpeg" });
       blob.name = baseName(path);
       loadFile(blob, baseNameNoExt(path), function(){
         currentPath = path;
@@ -1248,10 +1261,13 @@
   // file) is the entry point, same as the web version.
   if (tauri){
     tauri.core.invoke("get_initial_file").then(function(path){
-      if (!path) return;
+      if (!path) return endBoot();
       loadFromPath(path);
       initSiblings(path);
-    }).catch(function(err){ console.error("get_initial_file failed", err); });
+    }).catch(function(err){
+      endBoot();
+      console.error("get_initial_file failed", err);
+    });
   }
 })();
 </script>

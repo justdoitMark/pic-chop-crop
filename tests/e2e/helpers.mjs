@@ -76,7 +76,6 @@ export async function installTauriMock(page, opts) {
   for (const [path, f] of Object.entries(opts.files || {})) {
     files[path] = {
       base64: (f.raw || makePng(f.width, f.height, f.rgba)).toString("base64"),
-      mime: "image/png",
       delayMs: f.delayMs || 0,
     };
   }
@@ -109,7 +108,12 @@ export async function installTauriMock(page, opts) {
               if (!f) return Promise.reject("not found: " + args.path);
               return later(f.delayMs, () => {
                 log.resolvedReads.push(args.path);
-                return { base64: f.base64, mime: f.mime };
+                // Like the Rust command (tauri::ipc::Response): raw bytes as an ArrayBuffer.
+                const bin = atob(f.base64);
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                performance.mark("mock:read_file_bytes");
+                return bytes.buffer;
               });
             }
             case "write_file_bytes":
