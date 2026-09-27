@@ -392,10 +392,17 @@
   var tauri = window.__TAURI__ || null;
   var focusMode = false;
   var cropActive = true;    // рамка видна всегда, когда не включён фокус (C — скрыть)
-  var focusHintShown = false;
-  // Подсказка «Esc — рамка…» при первом открытии. Временно выключена по
-  // просьбе пользователя на время тестирования; true — вернуть.
-  var SHOW_FOCUS_HINT = false;
+  // Подсказка «Esc — рамка…» — только при первом открытии после холодного
+  // запуска. Тёплые открытия перезагружают страницу в том же окне, а
+  // sessionStorage переживает перезагрузку и живёт, пока жив процесс.
+  var FOCUS_HINT_KEY = "focusHintShown";
+  var focusHintShown = (function(){
+    try { return sessionStorage.getItem(FOCUS_HINT_KEY) === "1"; } catch (e) { return false; }
+  })();
+  function markFocusHintShown(){
+    focusHintShown = true;
+    try { sessionStorage.setItem(FOCUS_HINT_KEY, "1"); } catch (e) {}
+  }
 
   function $(id){ return document.getElementById(id); }
   var dropzone = $("dropzone"), fileInput = $("fileInput"), stage = $("stage"), imgTag = $("img");
@@ -785,8 +792,8 @@
       renderBox();
       updateCropVisibility();
       downloadBtn.disabled = false;
-      if (SHOW_FOCUS_HINT && firstOpen && !focusHintShown){
-        focusHintShown = true;
+      if (firstOpen && !focusHintShown){
+        markFocusHintShown();
         showHint("Esc — рамка и настройки размера");
       }
       endBoot();

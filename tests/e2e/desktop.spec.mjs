@@ -27,13 +27,26 @@ test.describe("opening a file", () => {
     await expect(page.locator("#cropBox")).toBeHidden();
     await expect(page.locator("#fileName")).toHaveText("a.png");
     await expect(page.locator("#fileSize")).toHaveText("800 × 600");
-    // The "Esc — рамка…" hint is switched off (SHOW_FOCUS_HINT) for now.
-    await page.waitForTimeout(300);
-    await expect(page.locator("#hint")).toBeHidden();
+    await expect(page.locator("#hint")).toBeVisible();
 
     await page.keyboard.press("c");
     await expect(page.locator("#cropBox")).toBeVisible();
     await expect(page.locator("body")).not.toHaveClass(/focusMode/);
+    await expect(page.locator("#hint")).toBeHidden();
+  });
+
+  // A warm open (the resident app gets another "Open with") reloads the page
+  // in the same window; the hint is for the cold start only.
+  test("the Esc hint shows on a cold start only, not on warm reopens", async ({ page }) => {
+    await openWith(page, { initialFile: A, files: { [A]: { width: 800, height: 600 } } });
+    await waitForImage(page, 800, 600);
+    await expect(page.locator("#hint")).toBeVisible();
+
+    await page.reload();
+    await waitForImage(page, 800, 600);
+    await page.waitForTimeout(300);
+    // A one-shot check: toBeHidden() would retry past the hint's own 4 s timeout.
+    expect(await page.locator("#hint").isVisible()).toBe(false);
   });
 });
 
