@@ -19,3 +19,9 @@ src-tauri/icons/64x64.png
 # local Rust build output
 src-tauri/Cargo.lock
 src-tauri/gen/
+
+# local project tracker and local Claude instructions
+PROGRESS.md
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/hooks/
