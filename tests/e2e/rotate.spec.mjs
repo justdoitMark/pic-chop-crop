@@ -52,7 +52,13 @@ test("R, L, Ctrl+R and the Russian К, Д rotate; Ctrl+R does not reload", async
   await page.evaluate(() => { window.__notReloaded = true; });
 
   for (const key of ["r", "l", "Control+r", "к", "д"]) await press(page, key);
-  expect((await rotations(page)).map((r) => r.quarterTurns)).toEqual([1, -1, 1, 1, -1]);
+  // Headless Edge never reloads on a synthetic Ctrl+R, so surviving proves
+  // little: the keydown itself must be cancelled (dispatchEvent → false).
+  const notCancelled = await page.evaluate(() =>
+    ["r", "к"].map((key) => document.dispatchEvent(
+      new KeyboardEvent("keydown", { key, code: "KeyR", ctrlKey: true, bubbles: true, cancelable: true }))));
+  expect(notCancelled).toEqual([false, false]);
+  expect((await rotations(page)).map((r) => r.quarterTurns)).toEqual([1, -1, 1, 1, -1, 1, 1]);
   expect(await page.evaluate(() => window.__notReloaded)).toBe(true);
   await expect(page.locator("#fileSize")).toHaveText("300 × 400");
 });
