@@ -185,7 +185,7 @@ async fn list_siblings(path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn write_file_bytes(path: String, data_base64: String) -> Result<(), String> {
+async fn write_file_bytes(path: String, data_base64: String) -> Result<(), String> {
     let bytes = STANDARD.decode(data_base64).map_err(|e| e.to_string())?;
     let _guard = rotate::lock(); // the user may save over the file being turned
     fs::write(&path, bytes).map_err(|e| e.to_string())
@@ -324,7 +324,7 @@ mod tests {
         let path = dir.join("out.png").to_string_lossy().into_owned();
         let bytes: &[u8] = b"\x89PNG\r\n\x1a\nnot really a png";
 
-        write_file_bytes(path.clone(), STANDARD.encode(bytes)).unwrap();
+        tauri::async_runtime::block_on(write_file_bytes(path.clone(), STANDARD.encode(bytes))).unwrap();
         assert_eq!(read_image(&path).unwrap(), bytes);
         fs::remove_dir_all(dir).unwrap();
     }
@@ -342,7 +342,7 @@ mod tests {
     fn write_file_bytes_rejects_invalid_base64() {
         let dir = temp_dir("badbase64");
         let path = dir.join("out.png");
-        assert!(write_file_bytes(path.to_string_lossy().into_owned(), "%%%".into()).is_err());
+        assert!(tauri::async_runtime::block_on(write_file_bytes(path.to_string_lossy().into_owned(), "%%%".into())).is_err());
         assert!(!path.exists());
         fs::remove_dir_all(dir).unwrap();
     }

@@ -60,34 +60,63 @@ fn write_at(path: &Path, offset: usize, bytes: &[u8]) -> Result<(), String> {
 }
 
 /// Writes the new bytes next to the file, then swaps them in, so the file is
-/// never half-written.
+/// never half-written. If the swap fails, `recover` puts the original back;
+/// the last copy of the image is never deleted.
 fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let tmp = temp_path(path);
-    let result = fs::write(&tmp, bytes).map_err(io_err).and_then(|_| swap_in(&tmp, path));
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
+    let tmp = temp_path(path, "pcc-tmp");
+    let bak = temp_path(path, "pcc-bak");
+    if let Err(e) = fs::write(&tmp, bytes) {
+        let _ = fs::remove_file(&tmp); // the original was not touched yet
+        return Err(io_err(e));
     }
-    result
+    match swap_in(&tmp, path, &bak) {
+        Ok(()) => {
+            let _ = fs::remove_file(&bak); // the turn is saved; a stray backup is harmless
+            Ok(())
+        }
+        Err(e) => {
+            recover(path, &tmp, &bak);
+            Err(e)
+        }
+    }
 }
 
-fn temp_path(path: &Path) -> PathBuf {
+/// After a failed swap: make sure `path` holds an image again, then clean up.
+/// Prefers the untouched original (backup), then the new file, over nothing.
+fn recover(path: &Path, tmp: &Path, bak: &Path) {
+    if !path.exists() {
+        if bak.exists() {
+            let _ = fs::rename(bak, path);
+        } else if tmp.exists() {
+            let _ = fs::rename(tmp, path);
+        }
+    }
+    if path.exists() {
+        let _ = fs::remove_file(tmp);
+        let _ = fs::remove_file(bak);
+    }
+}
+
+fn temp_path(path: &Path, ext: &str) -> PathBuf {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    path.with_file_name(format!(".{name}.pcc-tmp"))
+    path.with_file_name(format!(".{name}.{ext}"))
 }
 
 /// ReplaceFileW keeps the original's creation date, attributes, ACL and
-/// alternate streams (Zone.Identifier); a plain rename would not.
+/// alternate streams (Zone.Identifier); a plain rename would not. The backup
+/// name makes a half-done swap recoverable.
 #[cfg(windows)]
-fn swap_in(tmp: &Path, path: &Path) -> Result<(), String> {
+fn swap_in(tmp: &Path, path: &Path, bak: &Path) -> Result<(), String> {
     use windows::core::{HSTRING, PCWSTR};
     use windows::Win32::Foundation::E_ACCESSDENIED;
     use windows::Win32::Storage::FileSystem::{ReplaceFileW, REPLACE_FILE_FLAGS};
 
+    let bak = HSTRING::from(bak.as_os_str());
     unsafe {
         ReplaceFileW(
             &HSTRING::from(path.as_os_str()),
             &HSTRING::from(tmp.as_os_str()),
-            PCWSTR::null(),
+            PCWSTR(bak.as_ptr()),
             REPLACE_FILE_FLAGS(0),
             None,
             None,
@@ -97,7 +126,7 @@ fn swap_in(tmp: &Path, path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn swap_in(tmp: &Path, path: &Path) -> Result<(), String> {
+fn swap_in(tmp: &Path, path: &Path, _bak: &Path) -> Result<(), String> {
     fs::rename(tmp, path).map_err(io_err)
 }
 
@@ -239,6 +268,62 @@ mod tests {
         assert!(!reader.is_finished(), "read_image must wait for the file lock");
         drop(guard);
         assert_eq!(reader.join().unwrap().unwrap(), b"x");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect()
+    }
+
+    #[test]
+    fn recover_keeps_an_intact_original_and_drops_the_temp_file() {
+        let dir = temp_dir("rec-intact");
+        let (p, t, b) = (dir.join("a.jpg"), temp_path(&dir.join("a.jpg"), "pcc-tmp"), temp_path(&dir.join("a.jpg"), "pcc-bak"));
+        fs::write(&p, b"orig").unwrap();
+        fs::write(&t, b"new").unwrap();
+        recover(&p, &t, &b);
+        assert_eq!(fs::read(&p).unwrap(), b"orig");
+        assert_eq!(names(&dir), vec!["a.jpg"]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn recover_restores_the_original_from_the_backup() {
+        let dir = temp_dir("rec-bak");
+        let (p, t, b) = (dir.join("a.jpg"), temp_path(&dir.join("a.jpg"), "pcc-tmp"), temp_path(&dir.join("a.jpg"), "pcc-bak"));
+        fs::write(&b, b"orig").unwrap();
+        fs::write(&t, b"new").unwrap();
+        recover(&p, &t, &b);
+        assert_eq!(fs::read(&p).unwrap(), b"orig");
+        assert_eq!(names(&dir), vec!["a.jpg"]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn recover_keeps_the_new_file_when_it_is_the_only_copy() {
+        let dir = temp_dir("rec-tmp");
+        let (p, t, b) = (dir.join("a.jpg"), temp_path(&dir.join("a.jpg"), "pcc-tmp"), temp_path(&dir.join("a.jpg"), "pcc-bak"));
+        fs::write(&t, b"new").unwrap();
+        recover(&p, &t, &b);
+        assert_eq!(fs::read(&p).unwrap(), b"new");
+        assert_eq!(names(&dir), vec!["a.jpg"]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_failed_swap_leaves_the_original_and_no_leftovers() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = temp_dir("swapfail");
+        let p = dir.join("a.jpg");
+        let j = jpeg(&[app0()]); // untagged: takes the replace path
+        fs::write(&p, &j).unwrap();
+        // open without FILE_SHARE_DELETE so ReplaceFileW cannot move the file
+        let _held = OpenOptions::new().read(true).share_mode(1).open(&p).unwrap();
+        assert!(rotate_file(&p, 1).is_err());
+        assert_eq!(fs::read(&p).unwrap(), j);
+        assert_eq!(names(&dir), vec!["a.jpg"]);
+        drop(_held);
         fs::remove_dir_all(dir).unwrap();
     }
 }

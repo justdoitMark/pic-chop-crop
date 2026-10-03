@@ -168,6 +168,7 @@ fn parse_exif(jpeg: &[u8], seg_start: usize, seg_end: usize) -> Result<Exif, Str
 }
 
 /// The orientation stored in the file (None: no EXIF or no tag).
+#[cfg(test)]
 pub fn orientation(jpeg: &[u8]) -> Result<Option<u16>, String> {
     Ok(parse(jpeg)?.exif.and_then(|e| e.orientation).map(|(_, v)| v))
 }
