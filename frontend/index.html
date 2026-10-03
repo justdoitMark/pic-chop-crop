@@ -55,6 +55,12 @@
   #navPos{ min-width:54px; text-align:center; }
   .tools{ display:flex; align-items:center; gap:2px; justify-self:end; grid-column:3; }
   .barDiv{ width:1px; height:20px; background:var(--line); margin:0 4px; flex:none; }
+  /* Угол наклона — значение, которое меняется по клику, как масштаб рядом. */
+  #tiltBtn{ height:24px; display:flex; align-items:center; gap:4px; padding:0 7px; margin:0 2px; border:1px solid var(--line);
+    border-radius:var(--r-m); background:transparent; color:var(--muted); font-size:var(--fs-s); cursor:pointer; flex:none; }
+  #tiltBtn:hover, #tiltBtn[aria-expanded="true"]{ color:var(--text); border-color:var(--muted); }
+  #tiltBtn.on{ color:var(--cyan); border-color:var(--cyan); background:var(--cyanSoft); }
+  #tiltLbl{ min-width:3.2em; text-align:center; }
   .iconBtn{ width:30px; height:28px; display:grid; place-items:center; border:0; background:transparent; color:var(--muted);
     border-radius:var(--r-m); cursor:pointer; flex:none; }
   .iconBtn:hover{ background:var(--lineSoft); color:var(--text); }
@@ -70,6 +76,16 @@
   #scrollInner{ position:absolute; left:0; top:0; will-change:transform; }
   #stage{ position:relative; background:#000; user-select:none; overflow:hidden; flex:none;
     box-shadow:0 18px 50px rgba(0,0,0,.45); }
+  /* При наклоне углы stage пустые: цвет окружения, а не часть фото. Чёрная
+     подложка под прозрачными местами переезжает на саму картинку. */
+  #stage.tilted{ background:transparent; box-shadow:none; }
+  #stage.tilted img{ background:#000; }
+  /* Сетка для выравнивания горизонта — по экрану, а не по картинке. */
+  #tiltGrid{ position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .2s;
+    background-image:linear-gradient(to right, rgba(255,255,255,.4) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,.4) 1px, transparent 1px);
+    background-size:48px 48px; background-position:center; }
+  #stage.tilting #tiltGrid{ opacity:1; }
   /* Картинка поворачивается CSS-трансформацией вокруг центра; #stage — её
      габарит на экране (при наклоне — габарит наклонённой картинки). */
   #stage img{ position:absolute; left:0; top:0; display:block; transform-origin:50% 50%; }
@@ -185,7 +201,7 @@
   /* ---------- состояния ---------- */
   body:not(.ready) #fileSize, body:not(.ready) #zoomBtn, body:not(.ready) #cropToggleBtn,
   body:not(.ready) #focusToggleBtn, body:not(.ready) #rotateLeftBtn, body:not(.ready) #rotateRightBtn,
-  body:not(.ready) .barDiv{ display:none; }
+  body:not(.ready) #tiltBtn, body:not(.ready) .barDiv{ display:none; }
   body.ready #dropzone, html.booting #dropzone{ display:none; }
   body.ready #workspace{ display:block; }
 
@@ -224,6 +240,8 @@
   @media (max-width: 460px){
     #navPos, .barDiv{ display:none; }
     #bar .iconBtn{ width:28px; }
+    #tiltBtn svg{ display:none; }
+    #tiltLbl{ min-width:2.6em; }
     #pill{ gap:2px; padding:4px; }
     #pill .div, #ratioBtn svg, .pbtn .caret{ display:none; }
     .pbtn{ padding:0 6px; }
@@ -252,6 +270,7 @@
   <div class="tools">
     <button id="rotateLeftBtn" class="iconBtn" aria-label="Повернуть влево" title="Повернуть влево (L). Сохраняется в файл"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 9V7a2 2 0 0 0-2-2h-6"/><path d="m15 2-3 3 3 3"/><path d="M20 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg></button>
     <button id="rotateRightBtn" class="iconBtn" aria-label="Повернуть вправо" title="Повернуть вправо (R). Сохраняется в файл"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5H6a2 2 0 0 0-2 2v3"/><path d="m9 8 3-3-3-3"/><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg></button>
+    <button id="tiltBtn" aria-haspopup="true" aria-expanded="false" aria-label="Наклон" title="Наклон (клавиши [ и ]). Только для сохраняемой обрезки"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M3 20h18M3 20 17 6"/></svg><span id="tiltLbl" class="px">0°</span></button>
     <span class="barDiv" aria-hidden="true"></span>
     <button id="openBtn" class="iconBtn" aria-label="Открыть файл" title="Открыть файл (Ctrl+O)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
     <button id="cropToggleBtn" class="iconBtn" aria-label="Рамка" aria-pressed="false" title="Показать или скрыть рамку (C)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14"/></svg></button>
@@ -275,6 +294,7 @@
     <div id="scrollInner">
       <div id="stage">
         <img id="img" alt="" draggable="false">
+        <div id="tiltGrid"></div>
         <div id="cropBox">
           <div class="thirds"></div>
           <div class="handle tl" data-corner="tl"></div>
@@ -337,6 +357,7 @@
       <dt><kbd>Shift</kbd> + стрелки</dt><dd>Сдвинуть рамку на 1 px, с <kbd>Ctrl</kbd> — на 10 px</dd>
       <dt><kbd>X</kbd></dt><dd>Поменять ширину и высоту</dd>
       <dt><kbd>R</kbd> <kbd>L</kbd></dt><dd>Повернуть вправо / влево на 90° (сохраняется в файл)</dd>
+      <dt><kbd>]</kbd> <kbd>[</kbd></dt><dd>Наклон +1° / −1° (только для обрезки)</dd>
       <dt><kbd>0</kbd></dt><dd>Вписать изображение в окно</dd>
       <dt><kbd>1</kbd></dt><dd>Масштаб 100 %</dd>
       <dt>Колесо</dt><dd>Масштаб под курсором</dd>
@@ -410,7 +431,10 @@
   var quarterTurns = 0;     // поворот на 90° относительно загруженной картинки, 0…3
   // То же без деления по модулю: CSS-анимация 270° → 360° идёт на 90°, а 270° → 0° пошла бы на 270° назад.
   var viewTurns = 0;
-  var tilt = 0;             // наклон в градусах (Task 7)
+  var tilt = 0;             // наклон в градусах, −MAX_TILT…MAX_TILT
+  var MAX_TILT = 45;
+  var gridTimer = null;
+  var tiltBtn = $("tiltBtn");
   var turnTimer = null;
   // Подсказка «Esc — рамка…» — только при первом открытии после холодного
   // запуска. Тёплые открытия перезагружают страницу в том же окне, а
@@ -478,6 +502,7 @@
     imgTag.style.transform = "rotate(" + (viewTurns * 90 + tilt) + "deg)";
     stage.style.width = display.w + "px";
     stage.style.height = display.h + "px";
+    stage.classList.toggle("tilted", tilt !== 0);
     $("zoomBtn").textContent = Math.round(newScale * 100) + " %";
   }
 
@@ -527,6 +552,7 @@
     if (box){
       box = { x: box.x * ratio, y: box.y * ratio, w: box.w * ratio, h: box.h * ratio };
     }
+    if (box) box = G.fitInside(box, imageRect()); // накопленная погрешность не выводит рамку за картинку
 
     if (hasAnchor){
       offX = px - imgX * newScale;
@@ -726,6 +752,7 @@
       y: clamp(cy - h/2, area.y, area.y + area.h - h),
       w: w, h: h
     };
+    box = G.fitInside(box, imageRect());
     renderBox();
   }
 
@@ -741,7 +768,7 @@
   function nudge(dx, dy){
     var s = display.scale;
     var sx = Math.round(box.x / s) + dx, sy = Math.round(box.y / s) + dy;
-    box = { x: clamp(sx * s, 0, display.w - box.w), y: clamp(sy * s, 0, display.h - box.h), w: box.w, h: box.h };
+    box = G.clampBoxCenter({ x: sx * s, y: sy * s, w: box.w, h: box.h }, imageRect());
     renderBox();
   }
 
@@ -828,6 +855,45 @@
     }
   }
 
+  // ---------- наклон ----------
+
+  function tiltLabel(d){ return (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d) + "°"; }
+
+  function updateTiltUi(){
+    $("tiltLbl").textContent = tiltLabel(tilt);
+    tiltBtn.classList.toggle("on", tilt !== 0);
+  }
+
+  // Сетка видна, пока угол меняют, и гаснет через секунду после последнего изменения.
+  function flashGrid(){
+    stage.classList.add("tilting");
+    clearTimeout(gridTimer);
+    gridTimer = setTimeout(function(){ stage.classList.remove("tilting"); }, 1000);
+  }
+
+  // Новый угол: центр картинки на экране и положение рамки на картинке не
+  // меняются; рамка уменьшается и сдвигается, только если иначе вылезет на фон.
+  function setTilt(deg){
+    deg = clamp(Math.round(deg), -MAX_TILT, MAX_TILT);
+    if (!ready || deg === tilt) return;
+    var s = display.scale, oldW = display.w, oldH = display.h;
+    var centerX = offX + oldW / 2, centerY = offY + oldH / 2;
+    var rel = { x: (box.x + box.w / 2 - oldW / 2) / s, y: (box.y + box.h / 2 - oldH / 2) / s, w: box.w / s, h: box.h / s };
+    tilt = deg;
+    baseScale = computeBaseScale();
+    zoom = clamp(zoom, MIN_ZOOM, maxZoom());
+    resizeStageTo(baseScale * zoom);
+    var k = display.scale;
+    box = G.fitInside({ x: display.w / 2 + rel.x * k - rel.w * k / 2, y: display.h / 2 + rel.y * k - rel.h * k / 2, w: rel.w * k, h: rel.h * k }, imageRect());
+    offX = centerX - display.w / 2;
+    offY = centerY - display.h / 2;
+    clampOffsets();
+    applyTransform();
+    renderBox();
+    updateTiltUi();
+    flashGrid();
+  }
+
   // ---------- загрузка ----------
 
   function loadFile(file, name, onLoaded){
@@ -856,6 +922,7 @@
       raw = { w: image.naturalWidth, h: image.naturalHeight };
       quarterTurns = viewTurns = 0;
       tilt = 0;
+      updateTiltUi();
       updateNatural();
       image.id = "img";
       image.alt = "";
@@ -984,11 +1051,7 @@
       var b0 = dragState.box;
 
       if (dragState.mode === "move"){
-        box = {
-          x: clamp(b0.x + dx, 0, display.w - b0.w),
-          y: clamp(b0.y + dy, 0, display.h - b0.h),
-          w: b0.w, h: b0.h
-        };
+        box = G.clampBoxCenter({ x: b0.x + dx, y: b0.y + dy, w: b0.w, h: b0.h }, imageRect());
         renderBox();
         return;
       }
@@ -1006,17 +1069,9 @@
       var rawW = Math.abs(p.x - anchorX);
       var rawH = Math.abs(p.y - anchorY);
       var w = Math.max(rawW, rawH * aspect);
-
-      var maxW = growX === 1 ? display.w - anchorX : anchorX;
-      var maxH = growY === 1 ? display.h - anchorY : anchorY;
-
+      var maxW = G.maxWidthFromAnchor(anchorX, anchorY, growX, growY, aspect, imageRect());
       w = clamp(w, MIN_BOX, Math.max(maxW, MIN_BOX));
       var h = w / aspect;
-      if (h > maxH){
-        h = Math.max(maxH, MIN_BOX / aspect);
-        w = h * aspect;
-      }
-
       var x = growX === 1 ? anchorX : anchorX - w;
       var y = growY === 1 ? anchorY : anchorY - h;
 
@@ -1374,6 +1429,8 @@
     else if (low === "x" || low === "ч") setTarget(targetH, targetW);
     else if (low === "r" || low === "к") rotateBy(1);
     else if (low === "l" || low === "д") rotateBy(-1);
+    else if (key === "]" || low === "ъ") setTilt(tilt + 1);
+    else if (key === "[" || low === "х") setTilt(tilt - 1);
     else if (key === "0") fitToWindow();
     else if (key === "1") actualSize();
   });
