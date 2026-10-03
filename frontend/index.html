@@ -183,6 +183,21 @@
   .hint{ font-size:var(--fs-s); color:var(--muted); margin:10px 0 0; }
   .qHead{ display:flex; justify-content:space-between; font-size:var(--fs-s); color:var(--muted); margin:12px 0 6px; }
   #qualityRange{ width:100%; accent-color:var(--cyan); }
+  /* Линейка наклона: шкала едет под неподвижной голубой меткой, 1° = --deg px. */
+  #tiltPop{ width:min(320px, calc(100vw - 16px)); padding:10px 12px 8px; }
+  .tiltHead{ display:flex; align-items:center; gap:6px; }
+  #tiltValue{ flex:1; text-align:center; font-size:var(--fs-l); font-weight:600; color:var(--text); }
+  #tiltReset{ flex-direction:row; padding:4px 10px; font:600 var(--fs-s) var(--mono); }
+  #tiltRuler{ position:relative; height:44px; margin-top:6px; overflow:hidden; cursor:ew-resize; touch-action:none;
+    border-radius:var(--r-s); -webkit-mask-image:linear-gradient(to right, transparent, #000 18%, #000 82%, transparent);
+    mask-image:linear-gradient(to right, transparent, #000 18%, #000 82%, transparent); }
+  #tiltRuler::after{ content:""; position:absolute; left:50%; top:2px; height:22px; width:2px; margin-left:-1px;
+    background:var(--cyan); border-radius:1px; }
+  #tiltScale{ --deg:8px; position:absolute; left:50%; top:4px; height:36px; width:calc(90 * var(--deg) + 1px);
+    background:repeating-linear-gradient(to right, var(--muted) 0 1px, transparent 1px var(--deg)) top left / 100% 7px no-repeat; }
+  #tiltScale span{ position:absolute; top:0; width:1px; height:13px; background:var(--muted); }
+  #tiltScale b{ position:absolute; top:16px; transform:translateX(-50%); font:500 11px var(--mono); color:var(--muted); }
+  body.focusMode:has(#tiltPop.open) #bar{ opacity:1; }
 
   /* ---------- сообщения и справка ---------- */
   /* Сообщение об ошибке видно в любом режиме, включая фокус, и само гаснет. */
@@ -347,6 +362,18 @@
   <p class="hint" id="fmtHint">Без потерь, прозрачность сохраняется</p>
 </div>
 
+<div class="pop" id="tiltPop" data-place="below" role="dialog" aria-label="Наклон">
+  <div class="tiltHead">
+    <button id="tiltMinus" class="iconBtn" aria-label="Наклон −1°" title="−1° ([)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></button>
+    <span id="tiltValue" class="px">0°</span>
+    <button id="tiltPlus" class="iconBtn" aria-label="Наклон +1°" title="+1° (])"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>
+    <button id="tiltReset" class="chip" title="Сбросить наклон">0°</button>
+  </div>
+  <div id="tiltRuler" role="slider" tabindex="0" aria-label="Наклон, градусы" aria-valuemin="-45" aria-valuemax="45" aria-valuenow="0" aria-valuetext="0 градусов">
+    <div id="tiltScale"></div>
+  </div>
+</div>
+
 <div id="help" role="dialog" aria-label="Горячие клавиши">
   <div class="card">
     <h3>Горячие клавиши</h3>
@@ -433,8 +460,11 @@
   var viewTurns = 0;
   var tilt = 0;             // наклон в градусах, −MAX_TILT…MAX_TILT
   var MAX_TILT = 45;
+  var PX_PER_DEG = 8;       // то же, что --deg в CSS линейки
+  var SNAP_ZERO = 0.8;      // у нуля линейка «примагничивается»: 0° шире, чем ±0,5°
   var gridTimer = null;
   var tiltBtn = $("tiltBtn");
+  var tiltPop = $("tiltPop"), tiltRuler = $("tiltRuler");
   var turnTimer = null;
   // Подсказка «Esc — рамка…» — только при первом открытии после холодного
   // запуска. Тёплые открытия перезагружают страницу в том же окне, а
@@ -859,9 +889,22 @@
 
   function tiltLabel(d){ return (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d) + "°"; }
 
+  // «минус 3 градуса» — для экранного диктора
+  function tiltSpoken(d){
+    var n = Math.abs(d), m10 = n % 10, m100 = n % 100;
+    var word = m10 === 1 && m100 !== 11 ? "градус"
+      : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "градуса" : "градусов";
+    return (d < 0 ? "минус " : d > 0 ? "плюс " : "") + n + " " + word;
+  }
+
   function updateTiltUi(){
-    $("tiltLbl").textContent = tiltLabel(tilt);
+    var label = tiltLabel(tilt);
+    $("tiltLbl").textContent = label;
+    $("tiltValue").textContent = label;
     tiltBtn.classList.toggle("on", tilt !== 0);
+    tiltRuler.setAttribute("aria-valuenow", String(tilt));
+    tiltRuler.setAttribute("aria-valuetext", tiltSpoken(tilt));
+    $("tiltScale").style.transform = "translateX(" + (-(tilt + MAX_TILT) * PX_PER_DEG) + "px)";
   }
 
   // Сетка видна, пока угол меняют, и гаснет через секунду после последнего изменения.
@@ -1209,12 +1252,20 @@
     openAnchor = btn;
     placePop(pop, btn);
   }
-  // Поповер всегда над пилюлей и никогда не выходит за верх окна: высота
-  // ограничена свободным местом, остаток прокручивается внутри.
+  // Поповер пилюли — над ней и никогда не выше окна: высота ограничена
+  // свободным местом. Линейка наклона (data-place="below") — под строкой статуса.
   function placePop(pop, btn){
-    var r = btn.getBoundingClientRect(), above = pill.getBoundingClientRect().top;
+    var r = btn.getBoundingClientRect(), pw;
+    if (pop.getAttribute("data-place") === "below"){
+      pw = pop.offsetWidth;
+      pop.style.left = clamp(r.left + r.width / 2 - pw / 2, GAP, window.innerWidth - pw - GAP) + "px";
+      pop.style.top = $("bar").getBoundingClientRect().bottom + GAP + "px";
+      return;
+    }
+    var above = pill.getBoundingClientRect().top;
     pop.style.maxHeight = Math.max(120, above - GAP * 2) + "px";
-    var pw = pop.offsetWidth, ph = pop.offsetHeight;
+    pw = pop.offsetWidth;
+    var ph = pop.offsetHeight;
     pop.style.left = clamp(r.left + r.width / 2 - pw / 2, GAP, window.innerWidth - pw - GAP) + "px";
     pop.style.top = Math.max(GAP, above - ph - GAP) + "px";
   }
@@ -1323,7 +1374,7 @@
   $("ratioBtn").addEventListener("click", function(e){ e.stopPropagation(); openPop($("ratioPop"), $("ratioBtn")); });
   $("fmtBtn").addEventListener("click", function(e){ e.stopPropagation(); openPop($("fmtPop"), $("fmtBtn")); });
   document.addEventListener("pointerdown", function(e){
-    if (!e.target.closest(".pop, .pbtn")) closePops();
+    if (!e.target.closest(".pop, [aria-haspopup]")) closePops();
   });
   // Содержимое поповера меняется (JPEG → ползунок качества) — пересчитываем
   // позицию, иначе выросший поповер наезжает на пилюлю.
@@ -1344,6 +1395,57 @@
   flipBtn.addEventListener("click", function(){ setTarget(targetH, targetW); });
   $("rotateLeftBtn").addEventListener("click", function(){ rotateBy(-1); });
   $("rotateRightBtn").addEventListener("click", function(){ rotateBy(1); });
+
+  // Деления через 5° с подписями; мелкие деления через 1° рисует CSS.
+  (function buildRuler(){
+    var html = "";
+    for (var d = -MAX_TILT; d <= MAX_TILT; d += 5){
+      var x = (d + MAX_TILT) * PX_PER_DEG;
+      html += '<span style="left:' + x + 'px"></span><b style="left:' + x + 'px">' + (d < 0 ? "−" + -d : d) + "</b>";
+    }
+    $("tiltScale").innerHTML = html;
+  })();
+  updateTiltUi();
+
+  tiltBtn.addEventListener("click", function(e){ e.stopPropagation(); openPop(tiltPop, tiltBtn); });
+  $("tiltMinus").addEventListener("click", function(){ setTilt(tilt - 1); });
+  $("tiltPlus").addEventListener("click", function(){ setTilt(tilt + 1); });
+  $("tiltReset").addEventListener("click", function(){ setTilt(0); });
+
+  // Тянем шкалу: она едет под меткой, поэтому влево — больший угол.
+  tiltRuler.addEventListener("pointerdown", function(e){
+    if (e.button !== 0) return;
+    e.preventDefault();
+    tiltRuler.focus();
+    tiltRuler.setPointerCapture(e.pointerId);
+    var startX = e.clientX, start = tilt;
+    function onMove(ev){
+      var deg = start - (ev.clientX - startX) / PX_PER_DEG;
+      setTilt(Math.abs(deg) < SNAP_ZERO ? 0 : deg);
+    }
+    function onUp(){
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  });
+  tiltRuler.addEventListener("wheel", function(e){
+    e.preventDefault();
+    setTilt(tilt + (e.deltaY < 0 ? 1 : -1));
+  }, { passive: false });
+  tiltRuler.addEventListener("dblclick", function(){ setTilt(0); });
+  // Стрелки на линейке меняют угол и не уходят дальше — иначе листали бы файлы.
+  tiltRuler.addEventListener("keydown", function(e){
+    var step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
+    if (step) setTilt(tilt + step);
+    else if (e.key === "Home") setTilt(0);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
 
   prevBtn.addEventListener("click", function(){ goSibling(-1); });
   nextBtn.addEventListener("click", function(){ goSibling(1); });

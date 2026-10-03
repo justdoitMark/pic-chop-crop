@@ -188,3 +188,69 @@ test("tilt never reaches Rust and resets on the next file", async ({ page }) => 
   await waitForImage(page, 200, 100);
   await expect(page.locator("#tiltLbl")).toHaveText("0°");
 });
+
+test.describe("the tilt ruler", () => {
+  const PX_PER_DEG = 8; // frontend/index.html: PX_PER_DEG and --deg
+
+  test("opens from the angle button and closes with Esc", async ({ page }) => {
+    await open(page);
+    await page.click("#tiltBtn");
+    await expect(page.locator("#tiltPop")).toBeVisible();
+    await expect(page.locator("#tiltBtn")).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#tiltPop")).toBeHidden();
+  });
+
+  test("dragging the scale changes the angle by whole degrees", async ({ page }) => {
+    await open(page);
+    await page.click("#tiltBtn");
+    await drag(page, "#tiltRuler", -3 * PX_PER_DEG, 0); // the scale moves left: bigger angles come under the mark
+    await expect(page.locator("#tiltValue")).toHaveText("+3°");
+    await expect(page.locator("#tiltLbl")).toHaveText("+3°");
+  });
+
+  test("wheel, double-click and the buttons", async ({ page }) => {
+    await open(page);
+    await page.click("#tiltBtn");
+    const bb = await page.locator("#tiltRuler").boundingBox();
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    await page.mouse.wheel(0, -100);
+    await expect(page.locator("#tiltValue")).toHaveText("+1°");
+    await page.mouse.dblclick(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    await expect(page.locator("#tiltValue")).toHaveText("0°");
+    await page.click("#tiltPlus");
+    await page.click("#tiltPlus");
+    await expect(page.locator("#tiltValue")).toHaveText("+2°");
+    await page.click("#tiltMinus");
+    await expect(page.locator("#tiltValue")).toHaveText("+1°");
+    await page.click("#tiltReset");
+    await expect(page.locator("#tiltValue")).toHaveText("0°");
+  });
+
+  test("keyboard on the ruler, announced for screen readers, without paging files", async ({ page }) => {
+    await open(page, { siblings: [A, B], files: { [A]: { width: 400, height: 300, rgba: SOLID }, [B]: { width: 200, height: 100 } } });
+    await page.click("#tiltBtn");
+    await page.locator("#tiltRuler").focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.locator("#tiltRuler")).toHaveAttribute("aria-valuenow", "1");
+    await expect(page.locator("#tiltRuler")).toHaveAttribute("aria-valuetext", "плюс 1 градус");
+    await pressTimes(page, "ArrowLeft", 3);
+    await expect(page.locator("#tiltRuler")).toHaveAttribute("aria-valuetext", "минус 2 градуса");
+    await page.keyboard.press("Home");
+    await expect(page.locator("#tiltRuler")).toHaveAttribute("aria-valuetext", "0 градусов");
+    await expect(page.locator("#navPos")).toHaveText("1 / 2"); // arrows on the ruler did not change file
+    // ← after → would page back to 1 / 2, so also check that B was never asked for
+    const readB = await page.evaluate((b) => window.__mockLog.invokes.some((c) => c.cmd === "read_file_bytes" && c.args.path === b), B);
+    expect(readB).toBe(false);
+  });
+
+  test("in focus mode the bar stays visible while the ruler is open", async ({ page }) => {
+    await installTauriMock(page, { initialFile: A, files: { [A]: { width: 400, height: 300, rgba: SOLID } } });
+    await page.goto(APP_URL);
+    await waitForImage(page, 400, 300); // opens in focus mode
+    await page.click("#tiltBtn");
+    await page.locator("#tiltRuler").focus(); // as after a drag: the bar no longer holds focus
+    await page.mouse.move(400, 500); // away from the bar
+    await expect(page.locator("#bar")).toHaveCSS("opacity", "1");
+  });
+});

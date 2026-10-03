@@ -89,6 +89,11 @@ for (const size of SIZES) {
       expect(await page.evaluate(audit)).toEqual([]);
     });
 
+    test("tilt ruler fits under the bar", async ({ page }) => {
+      await page.click("#tiltBtn");
+      expect(await page.evaluate(audit)).toEqual([]);
+    });
+
     test("dimension labels stay on screen at 100 % zoom", async ({ page }) => {
       await page.keyboard.press("1");
       expect(await page.evaluate(audit)).toEqual([]);
