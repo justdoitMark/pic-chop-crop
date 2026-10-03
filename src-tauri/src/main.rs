@@ -22,6 +22,8 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State, WebviewWindow, WindowEvent};
 
+mod exif;
+
 fn mime_for(path: &Path) -> Option<&'static str> {
     match path
         .extension()
