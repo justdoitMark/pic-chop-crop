@@ -47,8 +47,17 @@ async function frameState(page) {
 async function expectFrameInside(page) {
   const { box, rect } = await frameState(page);
   // 0.01 px slack for rounding in the style strings
-  const grown = { x: box.x + 0.01, y: box.y + 0.01, w: box.w - 0.02, h: box.h - 0.02 };
-  expect(G.isBoxInside(grown, rect), JSON.stringify({ box, rect })).toBe(true);
+  const inset = { x: box.x + 0.01, y: box.y + 0.01, w: box.w - 0.02, h: box.h - 0.02 };
+  expect(G.isBoxInside(inset, rect), JSON.stringify({ box, rect })).toBe(true);
+}
+
+/** The frame's centre and size relative to the picture: [cx, cy, w, h] in picture widths/heights. */
+function relFrame({ box, rect }) {
+  return [(box.x + box.w / 2 - rect.cx) / rect.w, (box.y + box.h / 2 - rect.cy) / rect.h, box.w / rect.w, box.h / rect.h];
+}
+
+function expectSameFrame(after, before) {
+  relFrame(after).forEach((v, i) => expect(v, `component ${i}: ${relFrame(after)} vs ${relFrame(before)}`).toBeCloseTo(relFrame(before)[i], 3));
 }
 
 async function drag(page, selector, dx, dy) {
@@ -123,27 +132,51 @@ test("dragging and resizing keep the frame inside the tilted image", async ({ pa
 test("zoom and window resize keep the frame inside", async ({ page }) => {
   await open(page);
   await pressTimes(page, "]", 20);
+  // A frame already inside, pushed hard into a corner, must be neither moved nor shrunk.
+  await drag(page, "#cropBox", -3000, -3000);
+  await expectFrameInside(page);
+  const before = await frameState(page);
   const vp = await page.locator("#viewport").boundingBox();
   await page.mouse.move(vp.x + vp.width / 2, vp.y + vp.height / 2);
   for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -100);
   await expectFrameInside(page);
+  expectSameFrame(await frameState(page), before);
   await page.setViewportSize({ width: 700, height: 500 });
   await page.waitForTimeout(100);
   await expectFrameInside(page);
+  expectSameFrame(await frameState(page), before);
 });
 
-test("a tilt change keeps the frame where it was and shrinks it only if it must", async ({ page }) => {
+test("a tilt change keeps the frame where it was and does not resize it when it fits", async ({ page }) => {
   await open(page);
   await page.fill("#inputW", "100");
   await page.fill("#inputH", "100");
   await page.locator("#inputH").blur();
+  // a smaller frame, off centre, with room to spare at +1°
+  await drag(page, '.handle[data-corner="br"]', -120, -120);
+  await drag(page, "#cropBox", -60, -40);
   const before = await frameState(page);
+  const [cx, cy] = relFrame(before);
+  expect(Math.abs(cx)).toBeGreaterThan(0.05);
+  expect(Math.abs(cy)).toBeGreaterThan(0.05);
   await page.keyboard.press("]");
   const after = await frameState(page);
-  // centre relative to the picture centre, in picture pixels, stays put
-  const rel = (s) => [(s.box.x + s.box.w / 2 - s.rect.cx) / s.rect.w, (s.box.y + s.box.h / 2 - s.rect.cy) / s.rect.h];
-  expect(rel(after)[0]).toBeCloseTo(rel(before)[0], 3);
-  expect(rel(after)[1]).toBeCloseTo(rel(before)[1], 3);
+  expectSameFrame(after, before);
+  await expectFrameInside(page);
+});
+
+test("a tilt change shrinks the frame when it no longer fits", async ({ page }) => {
+  await open(page);
+  // the picture's own aspect: the frame nearly fills it
+  await page.fill("#inputW", "400");
+  await page.fill("#inputH", "300");
+  await page.locator("#inputH").blur();
+  const before = relFrame(await frameState(page));
+  await pressTimes(page, "]", 30);
+  const after = relFrame(await frameState(page));
+  expect(after[2]).toBeLessThan(before[2] * 0.9);
+  expect(after[3]).toBeLessThan(before[3] * 0.9);
+  expect(after[2] / after[3]).toBeCloseTo(before[2] / before[3], 3);
   await expectFrameInside(page);
 });
 
