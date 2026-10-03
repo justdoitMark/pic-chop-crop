@@ -65,7 +65,7 @@ fn write_at(path: &Path, offset: usize, bytes: &[u8]) -> Result<(), String> {
 fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let tmp = temp_path(path, "pcc-tmp");
     let bak = temp_path(path, "pcc-bak");
-    if let Err(e) = fs::write(&tmp, bytes) {
+    if let Err(e) = write_synced(&tmp, bytes) {
         let _ = fs::remove_file(&tmp); // the original was not touched yet
         return Err(io_err(e));
     }
@@ -79,6 +79,14 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
             Err(e)
         }
     }
+}
+
+/// The new bytes must be on disk before the swap: the backup of the original
+/// is deleted right after it, and a power cut must not leave a file of zeros.
+fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut f = fs::File::create(path)?;
+    f.write_all(bytes)?;
+    f.sync_all()
 }
 
 /// After a failed swap: make sure `path` holds an image again, then clean up.
