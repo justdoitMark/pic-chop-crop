@@ -1016,7 +1016,7 @@
   // OS handed us on launch, and for Prev/Next navigation). `index` is the
   // file's position in `siblings`; it becomes current only once the image
   // has actually loaded, so a failed load never moves the counter.
-  function loadFromPath(path, index, bytesPromise){
+  function loadFromPath(path, index, bytesPromise, onShown){
     if (!tauri) return;
     var seq = ++loadSeq;
     (bytesPromise || tauri.core.invoke("read_file_bytes", { path: path })).then(function(bytes){
@@ -1029,6 +1029,7 @@
         currentPath = path;
         if (typeof index === "number") siblingIndex = navIndex = index;
         updateNavButtons();
+        if (onShown) onShown();
       });
     }).catch(function(err){
       console.error("read_file_bytes failed", err);
@@ -1036,19 +1037,31 @@
     });
   }
 
-  function clearSiblings(){
-    currentPath = null;
+  // siblingsSeq: a folder listing that resolves after the folder was cleared
+  // or replaced (a drop, another Ctrl+O) is stale and must not come back.
+  var siblingsSeq = 0;
+
+  function forgetSiblings(){
+    siblingsSeq++;
     siblings = [];
     siblingIndex = navIndex = -1;
   }
 
+  function clearSiblings(){
+    currentPath = null;
+    forgetSiblings();
+  }
+
   function initSiblings(path){
     if (!tauri) return;
+    var seq = siblingsSeq;
     tauri.core.invoke("list_siblings", { path: path }).then(function(list){
+      if (seq !== siblingsSeq) return;
       siblings = list;
       siblingIndex = navIndex = siblings.indexOf(path);
       updateNavButtons();
     }).catch(function(){
+      if (seq !== siblingsSeq) return;
       clearSiblings();
       updateNavButtons();
     });
@@ -1079,6 +1092,29 @@
     loadFile(file, undefined, function(){
       clearSiblings();
       updateNavButtons();
+    });
+  }
+
+  // В десктопе — нативный диалог: у файла есть путь, поэтому поворот
+  // сохраняется в файл и работает Prev/Next по папке. В браузере — <input>.
+  // Как и openLocalFile, трогает путь и папку прежнего файла, только когда
+  // выбранный уже на экране; если он не открылся, прежний остаётся как был.
+  function chooseFile(){
+    if (!(tauri && tauri.dialog && tauri.dialog.open)){ fileInput.click(); return; }
+    tauri.dialog.open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Изображения", extensions: ["jpg", "jpeg", "png"] }]
+    }).then(function(path){
+      if (!path) return; // отмена
+      loadFromPath(path, undefined, undefined, function(){
+        forgetSiblings();
+        updateNavButtons();
+        initSiblings(path);
+      });
+    }, function(err){
+      console.error("open dialog failed, falling back", err);
+      fileInput.click();
     });
   }
 
@@ -1348,11 +1384,11 @@
   }
 
   // --- wire up events ---
-  $("dropCard").addEventListener("click", function(){ fileInput.click(); });
+  $("dropCard").addEventListener("click", chooseFile);
   $("dropCard").addEventListener("keydown", function(e){
-    if (e.key === "Enter" || e.key === " "){ e.preventDefault(); fileInput.click(); }
+    if (e.key === "Enter" || e.key === " "){ e.preventDefault(); chooseFile(); }
   });
-  $("openBtn").addEventListener("click", function(){ fileInput.click(); });
+  $("openBtn").addEventListener("click", chooseFile);
   fileInput.addEventListener("change", function(e){
     if (e.target.files && e.target.files[0]) openLocalFile(e.target.files[0]);
     fileInput.value = "";
@@ -1578,7 +1614,7 @@
     var key = e.key, low = key.toLowerCase();
     // Ctrl+S / Ctrl+O работают и из полей ввода (ы/щ — русская раскладка)
     if (e.ctrlKey && !e.altKey && (low === "s" || low === "ы")){ e.preventDefault(); download(); return; }
-    if (e.ctrlKey && !e.altKey && (low === "o" || low === "щ")){ e.preventDefault(); fileInput.click(); return; }
+    if (e.ctrlKey && !e.altKey && (low === "o" || low === "щ")){ e.preventDefault(); chooseFile(); return; }
     // Ctrl+R — как в «Фотографиях» Windows; заодно WebView2 не перезагрузит страницу
     if (e.ctrlKey && !e.altKey && (low === "r" || low === "к")){ e.preventDefault(); rotateBy(1); return; }
 

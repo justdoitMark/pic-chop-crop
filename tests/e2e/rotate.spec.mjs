@@ -161,3 +161,63 @@ test("a dropped file (no path) turns on screen only and says so", async ({ page 
   await expect(page.locator("#hint")).toHaveText("Этот файл открыт без пути — поворот виден только здесь, в файл не сохраняется");
   expect(await rotations(page)).toEqual([]);
 });
+
+test.describe("Ctrl+O opens through the native dialog", () => {
+  const files = { [A]: quad, [B]: { width: 200, height: 100 } };
+
+  test("the chosen file opens with its path: turns are saved and Prev/Next works", async ({ page }) => {
+    await openWith(page, { initialFile: A, siblings: [A, B], files, openResult: B });
+    await waitForImage(page, 400, 300);
+    await page.keyboard.press("Control+o");
+    await waitForImage(page, 200, 100);
+    expect(await page.evaluate(() => window.__mockLog.opens)).toHaveLength(1);
+    await expect(page.locator("#navPos")).toHaveText("2 / 2");
+    await page.keyboard.press("r");
+    expect(await rotations(page)).toEqual([{ path: B, quarterTurns: 1 }]);
+  });
+
+  test("the folder button uses the same dialog", async ({ page }) => {
+    await openWith(page, { initialFile: A, siblings: [A, B], files, openResult: B });
+    await waitForImage(page, 400, 300);
+    await page.keyboard.press("Escape");
+    await page.click("#openBtn");
+    await waitForImage(page, 200, 100);
+  });
+
+  test("cancelling the dialog keeps the current image", async ({ page }) => {
+    await openWith(page, { initialFile: A, siblings: [A, B], files, openResult: null });
+    await waitForImage(page, 400, 300);
+    await page.keyboard.press("Control+o");
+    await page.waitForFunction(() => window.__mockLog.opens.length === 1);
+    await page.waitForTimeout(200);
+    await expect(page.locator("#fileName")).toHaveText("a.png");
+    await expect(page.locator("#navPos")).toHaveText("1 / 2");
+  });
+
+  test("a chosen file that fails to load leaves the picture on screen with its path and folder", async ({ page }) => {
+    await openWith(page, { initialFile: A, siblings: [A, B], files, openResult: "C:\\pics\\missing.png" });
+    await waitForImage(page, 400, 300);
+    await page.keyboard.press("Control+o");
+    await expect(page.locator("#notice")).toContainText("missing");
+    await expect(page.locator("#fileName")).toHaveText("a.png");
+    await expect(page.locator("#navPos")).toHaveText("1 / 2");
+    await page.keyboard.press("r");
+    expect(await rotations(page)).toEqual([{ path: A, quarterTurns: 1 }]);
+    await page.keyboard.press("ArrowRight");
+    await waitForImage(page, 200, 100);
+  });
+
+  test("a turn while the chosen file is still loading goes to the file on screen", async ({ page }) => {
+    await openWith(page, {
+      initialFile: A, siblings: [A, B], openResult: B,
+      files: { [A]: quad, [B]: { width: 200, height: 100, delayMs: 400 } },
+    });
+    await waitForImage(page, 400, 300);
+    await page.keyboard.press("Control+o");
+    await page.waitForFunction(() => window.__mockLog.opens.length === 1);
+    await page.keyboard.press("r");
+    await waitForImage(page, 200, 100);
+    expect(await rotations(page)).toEqual([{ path: A, quarterTurns: 1 }]);
+    await expect(page.locator("#navPos")).toHaveText("2 / 2");
+  });
+});
