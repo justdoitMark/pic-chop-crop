@@ -4,7 +4,7 @@
 import { test, expect } from "@playwright/test";
 import { APP_URL, installTauriMock, waitForImage, exportPixels, expectColors, withOrientation, RED, GREEN, BLUE, YELLOW } from "./helpers.mjs";
 
-const J = "C:\pics\phone.jpg";
+const J = "C:\\pics\\phone.jpg";
 const CORNERS = [[0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9]];
 
 /** A 64×48 JPEG with four solid quadrants, encoded by the browser itself. */
