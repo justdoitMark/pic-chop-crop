@@ -72,6 +72,13 @@ test("maxWidthFromAnchor stops at the tilted edge for every corner", () => {
   expect(G.maxWidthFromAnchor(0, 0, 1, 1, 1, r)).toBe(0); // anchor outside the image
 });
 
+test("maxWidthFromAnchor tolerates float noise at an anchor sitting on the tilted edge", () => {
+  const r = rect(20), t = G.cosSin(20);
+  const u = r.w / 2 + 1e-12, v = 0; // on the right edge, nudged outward by float noise
+  const ax = r.cx + u * t.c - v * t.s, ay = r.cy + u * t.s + v * t.c;
+  expect(G.maxWidthFromAnchor(ax, ay, -1, -1, 1, r)).toBeGreaterThan(1);
+});
+
 test("fitInside shrinks an oversized frame around its centre, then clamps it", () => {
   const r = rect(30);
   const out = G.fitInside({ x: 0, y: 0, w: 800, h: 450 }, r);

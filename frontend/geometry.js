@@ -7,6 +7,9 @@
   "use strict";
 
   var EPS = 1e-6;
+  // Допуск (px) для поиска ширины от угла: далеко меньше пикселя, но намного больше
+  // float-шума (~1e-12) у угла, лежащего на краю наклонённой картинки.
+  var SEARCH_EPS = 1e-9;
 
   function clampNum(v, min, max){ return Math.min(Math.max(v, min), max); }
 
@@ -78,17 +81,18 @@
   // Наибольшая ширина рамки, растягиваемой из неподвижного угла (ax, ay) в
   // сторону growX/growY (±1). Бинарный поиск: при наклоне край картинки не
   // параллелен рамке, и формула зависит от того, какой угол упрётся первым.
-  // Ищем с eps=0 (точная граница), чтобы результат был консервативен.
+  // Ищем с SEARCH_EPS, а не с 0: угол после clampBoxCenter может выходить за край
+  // на float-шум, и при eps=0 рамка у края схлопывалась бы в 0.
   function maxWidthFromAnchor(ax, ay, growX, growY, aspect, rect){
     function boxOf(w){
       var h = w / aspect;
       return { x: growX > 0 ? ax : ax - w, y: growY > 0 ? ay : ay - h, w: w, h: h };
     }
-    if (!inside(boxOf(0), rect, 0)) return 0;
+    if (!inside(boxOf(0), rect, SEARCH_EPS)) return 0;
     var lo = 0, hi = rect.w + rect.h;
     for (var i = 0; i < 40; i++){
       var mid = (lo + hi) / 2;
-      if (inside(boxOf(mid), rect, 0)) lo = mid; else hi = mid;
+      if (inside(boxOf(mid), rect, SEARCH_EPS)) lo = mid; else hi = mid;
     }
     return lo;
   }
