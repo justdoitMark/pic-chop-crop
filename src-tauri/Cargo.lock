@@ -2473,6 +2473,9 @@ name = "pic-chop-crop"
 version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
+ "crc32fast",
+ "miniz_oxide 0.8.9",
+ "png 0.17.16",
  "serde",
  "serde_json",
  "tauri",

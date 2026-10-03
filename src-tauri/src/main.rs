@@ -23,6 +23,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Manager, State, WebviewWindow, WindowEvent};
 
 mod exif;
+mod png_rotate;
 
 fn mime_for(path: &Path) -> Option<&'static str> {
     match path
