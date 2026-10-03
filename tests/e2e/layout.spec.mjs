@@ -132,7 +132,7 @@ test.describe("touch screen", () => {
     test(`${width}x480: ${big ? "44 px targets" : "regular targets"}, everything fits`, async ({ page }) => {
       await page.setViewportSize({ width, height: 480 });
       await installTauriMock(page, {
-        initialFile: A, siblings: [A, "C:\pics\b.png"],
+        initialFile: A, siblings: [A, "C:\\pics\\b.png"],
         files: { [A]: { width: 1600, height: 1000 } },
       });
       await page.goto(APP_URL);

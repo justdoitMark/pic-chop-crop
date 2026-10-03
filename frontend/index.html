@@ -1238,7 +1238,8 @@
   function setFocus(on){
     if (!ready || focusMode === on) return;
     focusMode = on;
-    setPeek(false);
+    // Вошли в фокус касанием — панель видна (нажатая кнопка в фокусе) и прячется через 3 с.
+    setPeek(on && document.body.classList.contains("touchInput"));
     if (!on){
       cropActive = true;          // вышли из фокуса — сразу видно, что уйдёт в файл
       hint.style.display = "none";
@@ -1252,7 +1253,7 @@
   // тап по верхней полосе (~1,5 см) только показывает панель, нажимает —
   // следующий. Панель прячется через 3 с или после тапа ниже полосы.
   var PEEK_ZONE = 56, PEEK_MS = 3000;
-  var peekTimer = null, swallowClickUntil = 0;
+  var peekTimer = null, swallowPointer = null;
   function setPeek(on){
     document.body.classList.toggle("barPeek", on);
     clearTimeout(peekTimer);
@@ -1271,25 +1272,28 @@
       $("bar").matches(":focus-within");
   }
   document.addEventListener("pointerdown", function(e){
+    swallowPointer = null;   // новое касание или клик: клик проглоченного тапа уже прошёл или не придёт
     document.body.classList.toggle("touchInput", e.pointerType === "touch");
     if (e.pointerType !== "touch" || !focusMode) return;
-    swallowClickUntil = 0;   // новый тап: клик предыдущего уже прошёл
     if (e.clientY > Math.max($("bar").offsetHeight, PEEK_ZONE)){ endPeek(); return; }
+    if (help.classList.contains("open")) return;   // поверх справки полоса — её фон, а не панель
     if (barShown()){ setPeek(true); return; }
     e.preventDefault();
     e.stopPropagation();
-    swallowClickUntil = Date.now() + 600;
+    swallowPointer = e.pointerId;
     setPeek(true);
   }, true);
   document.addEventListener("pointermove", function(e){
     if (e.pointerType === "mouse") document.body.classList.remove("touchInput");
   });
-  // pointerdown.preventDefault() не отменяет click — гасим его отдельно.
+  // pointerdown.preventDefault() не отменяет click — гасим его отдельно. click —
+  // PointerEvent того же указателя, сколько бы ни держали палец; у клика
+  // с клавиатуры pointerId −1, его не трогаем.
   document.addEventListener("click", function(e){
-    if (Date.now() < swallowClickUntil){
+    if (swallowPointer !== null && e.pointerId === swallowPointer){
       e.preventDefault();
       e.stopPropagation();
-      swallowClickUntil = 0;
+      swallowPointer = null;
     }
   }, true);
 

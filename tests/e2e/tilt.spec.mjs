@@ -346,4 +346,58 @@ test.describe("touch in focus mode", () => {
     await page.touchscreen.tap(rot.x + rot.width / 2, rot.y + rot.height / 2);
     await page.waitForFunction(() => window.__mockLog.rotations.length === 1); // the first tap pressed
   });
+
+  /** Raw touch through CDP: points is a list of [x, y]; the finger rests holdMs on the first one. */
+  async function touchPath(page, points, holdMs = 0) {
+    const cdp = await page.context().newCDPSession(page);
+    const pt = ([x, y]) => [{ x, y, id: 1 }];
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: pt(points[0]) });
+    if (holdMs) await page.waitForTimeout(holdMs);
+    for (const p of points.slice(1)) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: pt(p) });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await cdp.detach();
+  }
+
+  test("a long first touch on the hidden bar still only reveals it", async ({ page }) => {
+    await installTauriMock(page, { initialFile: A, files: { [A]: { width: 400, height: 300, rgba: SOLID } } });
+    await page.goto(APP_URL);
+    await waitForImage(page, 400, 300); // focus mode, bar hidden
+    const bb = await page.locator("#rotateRightBtn").boundingBox();
+    await touchPath(page, [[bb.x + bb.width / 2, bb.y + bb.height / 2]], 700);
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 100))); // let a late click arrive
+    await expect(page.locator("body")).toHaveClass(/\bbarPeek\b/);
+    expect(await page.evaluate(() => window.__mockLog.rotations)).toEqual([]);
+  });
+
+  test("a mouse click right after a touch swipe in the strip is not eaten", async ({ page }) => {
+    await installTauriMock(page, { initialFile: A, files: { [A]: { width: 400, height: 300, rgba: SOLID } } });
+    await page.goto(APP_URL);
+    await waitForImage(page, 400, 300);
+    await touchPath(page, [[600, 10], [650, 10], [700, 10]]); // a swipe: no click follows it
+    await expect(page.locator("body")).toHaveClass(/\bbarPeek\b/);
+    await page.click("#rotateRightBtn"); // the mouse, at once
+    await page.waitForFunction(() => window.__mockLog.rotations.length === 1);
+  });
+
+  test("focus mode entered by a tap hides the bar after 3 s", async ({ page }) => {
+    await installTauriMock(page, { initialFile: A, files: { [A]: { width: 400, height: 300, rgba: SOLID } } });
+    await page.goto(APP_URL);
+    await waitForImage(page, 400, 300);
+    await page.keyboard.press("Escape"); // leave focus mode: the bar is plainly visible
+    const bb = await page.locator("#focusToggleBtn").boundingBox();
+    await page.touchscreen.tap(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    await expect(page.locator("body")).toHaveClass(/\bfocusMode\b/);
+    await expect(page.locator("#bar")).toHaveCSS("opacity", "0", { timeout: 4500 });
+  });
+
+  test("a tap on the open help is never swallowed", async ({ page }) => {
+    await installTauriMock(page, { initialFile: A, files: { [A]: { width: 400, height: 300, rgba: SOLID } } });
+    await page.goto(APP_URL);
+    await waitForImage(page, 400, 300); // focus mode, bar hidden
+    await page.keyboard.press("?");
+    await expect(page.locator("#help")).toHaveClass(/\bopen\b/);
+    await page.touchscreen.tap(20, 10); // the dark backdrop, inside the top strip
+    await expect(page.locator("#help")).not.toHaveClass(/\bopen\b/);
+    expect(await page.evaluate(() => document.body.classList.contains("barPeek"))).toBe(false);
+  });
 });
