@@ -51,6 +51,9 @@ function audit() {
   for (let i = 0; i < groups.length; i++)
     for (let j = i + 1; j < groups.length; j++)
       if (overlap(groups[i], groups[j])) out.push("status bar items overlap");
+  // the file name may be cut short, but never squeezed to nothing
+  const fileName = document.getElementById("fileName");
+  if (fileName.checkVisibility() && R(fileName).width === 0) out.push("file name has no room");
   return out;
 }
 

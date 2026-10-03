@@ -53,7 +53,8 @@
   #zoomBtn:hover{ color:var(--text); border-color:var(--muted); }
   #navRow{ display:flex; align-items:center; gap:2px; font-size:var(--fs-s); color:var(--muted); grid-column:2; }
   #navPos{ min-width:54px; text-align:center; }
-  .tools{ display:flex; gap:2px; justify-self:end; grid-column:3; }
+  .tools{ display:flex; align-items:center; gap:2px; justify-self:end; grid-column:3; }
+  .barDiv{ width:1px; height:20px; background:var(--line); margin:0 4px; flex:none; }
   .iconBtn{ width:30px; height:28px; display:grid; place-items:center; border:0; background:transparent; color:var(--muted);
     border-radius:var(--r-m); cursor:pointer; flex:none; }
   .iconBtn:hover{ background:var(--lineSoft); color:var(--text); }
@@ -69,7 +70,10 @@
   #scrollInner{ position:absolute; left:0; top:0; will-change:transform; }
   #stage{ position:relative; background:#000; user-select:none; overflow:hidden; flex:none;
     box-shadow:0 18px 50px rgba(0,0,0,.45); }
-  #stage img{ display:block; }
+  /* Картинка поворачивается CSS-трансформацией вокруг центра; #stage — её
+     габарит на экране (при наклоне — габарит наклонённой картинки). */
+  #stage img{ position:absolute; left:0; top:0; display:block; transform-origin:50% 50%; }
+  #stage.turning img{ transition:transform .15s ease-out; }
   #stage.canPan{ cursor:grab; }
   #stage.panning{ cursor:grabbing; }
   #cropBox{ position:absolute; display:none; outline:1.5px solid var(--cyan); box-shadow:0 0 0 9999px var(--dim);
@@ -180,7 +184,8 @@
 
   /* ---------- состояния ---------- */
   body:not(.ready) #fileSize, body:not(.ready) #zoomBtn, body:not(.ready) #cropToggleBtn,
-  body:not(.ready) #focusToggleBtn{ display:none; }
+  body:not(.ready) #focusToggleBtn, body:not(.ready) #rotateLeftBtn, body:not(.ready) #rotateRightBtn,
+  body:not(.ready) .barDiv{ display:none; }
   body.ready #dropzone, html.booting #dropzone{ display:none; }
   body.ready #workspace{ display:block; }
 
@@ -208,6 +213,7 @@
   }
   @media (max-width: 760px){
     #downloadBtn .lbl, #fileSize{ display:none; }
+    #bar{ grid-template-columns:minmax(0,1fr) auto auto; }
     .dims input{ width:62px; font-size:14px; }
   }
   @media (max-width: 560px){
@@ -216,6 +222,8 @@
     #bar{ gap:6px; }
   }
   @media (max-width: 460px){
+    #navPos, .barDiv{ display:none; }
+    #bar .iconBtn{ width:28px; }
     #pill{ gap:2px; padding:4px; }
     #pill .div, #ratioBtn svg, .pbtn .caret{ display:none; }
     .pbtn{ padding:0 6px; }
@@ -242,6 +250,9 @@
     <button id="nextBtn" class="iconBtn" aria-label="Следующий файл" title="Следующий файл в папке (→)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>
   </div>
   <div class="tools">
+    <button id="rotateLeftBtn" class="iconBtn" aria-label="Повернуть влево" title="Повернуть влево (L). Сохраняется в файл"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 9V7a2 2 0 0 0-2-2h-6"/><path d="m15 2-3 3 3 3"/><path d="M20 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg></button>
+    <button id="rotateRightBtn" class="iconBtn" aria-label="Повернуть вправо" title="Повернуть вправо (R). Сохраняется в файл"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5H6a2 2 0 0 0-2 2v3"/><path d="m9 8 3-3-3-3"/><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg></button>
+    <span class="barDiv" aria-hidden="true"></span>
     <button id="openBtn" class="iconBtn" aria-label="Открыть файл" title="Открыть файл (Ctrl+O)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
     <button id="cropToggleBtn" class="iconBtn" aria-label="Рамка" aria-pressed="false" title="Показать или скрыть рамку (C)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14"/></svg></button>
     <button id="focusToggleBtn" class="iconBtn" aria-label="Режим фокуса" aria-pressed="false" title="Только изображение (F, выйти — Esc)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/></svg></button>
@@ -325,6 +336,7 @@
       <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Предыдущий и следующий файл в папке</dd>
       <dt><kbd>Shift</kbd> + стрелки</dt><dd>Сдвинуть рамку на 1 px, с <kbd>Ctrl</kbd> — на 10 px</dd>
       <dt><kbd>X</kbd></dt><dd>Поменять ширину и высоту</dd>
+      <dt><kbd>R</kbd> <kbd>L</kbd></dt><dd>Повернуть вправо / влево на 90° (сохраняется в файл)</dd>
       <dt><kbd>0</kbd></dt><dd>Вписать изображение в окно</dd>
       <dt><kbd>1</kbd></dt><dd>Масштаб 100 %</dd>
       <dt>Колесо</dt><dd>Масштаб под курсором</dd>
@@ -337,6 +349,7 @@
 
 <input id="fileInput" type="file" accept="image/jpeg,image/png" style="display:none">
 
+<script src="geometry.js"></script>
 <script>
 (function(){
   "use strict";
@@ -392,6 +405,13 @@
   var tauri = window.__TAURI__ || null;
   var focusMode = false;
   var cropActive = true;    // рамка видна всегда, когда не включён фокус (C — скрыть)
+  var G = window.PccGeometry;
+  var raw = { w:0, h:0 };   // размер картинки, как её декодировал браузер (EXIF-ориентация уже учтена)
+  var quarterTurns = 0;     // поворот на 90° относительно загруженной картинки, 0…3
+  // То же без деления по модулю: CSS-анимация 270° → 360° идёт на 90°, а 270° → 0° пошла бы на 270° назад.
+  var viewTurns = 0;
+  var tilt = 0;             // наклон в градусах (Task 7)
+  var turnTimer = null;
   // Подсказка «Esc — рамка…» — только при первом открытии после холодного
   // запуска. Тёплые открытия перезагружают страницу в том же окне, а
   // sessionStorage переживает перезагрузку и живёт, пока жив процесс.
@@ -416,6 +436,14 @@
 
   function clamp(v, min, max){ return Math.min(Math.max(v, min), max); }
 
+  function updateNatural(){ natural = G.orientedSize(raw.w, raw.h, quarterTurns); }
+
+  // Картинка в координатах #stage: прямоугольник размера после поворота на 90°,
+  // наклонённый на tilt вокруг центра stage.
+  function imageRect(){
+    return { cx: display.w / 2, cy: display.h / 2, w: natural.w * display.scale, h: natural.h * display.scale, deg: tilt };
+  }
+
   function fitBox(dw, dh, aspect){
     var w, h;
     if (dw / dh > aspect){ h = dh; w = h * aspect; }
@@ -432,16 +460,22 @@
     var availW = Math.max(80, viewport.clientWidth - 2 - pad * 2);
     var availH = Math.max(80, viewport.clientHeight - 2 - pad * 2);
     var cap = focusMode ? 8 : 4;
-    return Math.min(availW / natural.w, availH / natural.h, cap);
+    var b = G.boundingSize(natural.w, natural.h, tilt);
+    return Math.min(availW / b.w, availH / b.h, cap);
   }
 
   // До 100 % можно дойти всегда, даже если это больше обычного предела зума.
   function maxZoom(){ return Math.max(MAX_ZOOM, 1 / baseScale); }
 
   function resizeStageTo(newScale){
-    display = { w: natural.w * newScale, h: natural.h * newScale, scale: newScale };
-    imgTag.style.width = display.w + "px";
-    imgTag.style.height = display.h + "px";
+    var b = G.boundingSize(natural.w, natural.h, tilt);
+    display = { w: b.w * newScale, h: b.h * newScale, scale: newScale };
+    var iw = raw.w * newScale, ih = raw.h * newScale;
+    imgTag.style.width = iw + "px";
+    imgTag.style.height = ih + "px";
+    imgTag.style.left = (display.w - iw) / 2 + "px";
+    imgTag.style.top = (display.h - ih) / 2 + "px";
+    imgTag.style.transform = "rotate(" + (viewTurns * 90 + tilt) + "deg)";
     stage.style.width = display.w + "px";
     stage.style.height = display.h + "px";
     $("zoomBtn").textContent = Math.round(newScale * 100) + " %";
@@ -523,6 +557,18 @@
 
   function fitToWindow(){ setZoom(1); }
   function actualSize(){ setZoom(1 / baseScale); }
+
+  // Вписать картинку в окно и поставить рамку заново: новый файл, поворот на 90°.
+  function resetView(){
+    zoom = 1;
+    baseScale = computeBaseScale();
+    resizeStageTo(baseScale * zoom);
+    offX = offY = 0;
+    clampOffsets();
+    box = G.fitInside(fitBox(display.w, display.h, targetW / targetH), imageRect());
+    applyTransform();
+    renderBox();
+  }
 
   // ---------- размер результата ----------
 
@@ -739,6 +785,49 @@
     showNotice(text);
   }
 
+  // ---------- поворот на 90° ----------
+
+  // Подсказка, которую показываем один раз за сеанс (sessionStorage живёт,
+  // пока жив процесс, и переживает перезагрузки страницы).
+  function onceHint(key, text){
+    try {
+      if (sessionStorage.getItem(key) === "1") return;
+      sessionStorage.setItem(key, "1");
+    } catch (e) {}
+    showHint(text);
+  }
+
+  var ROTATE_ERRORS = {
+    "read-only": "Поворот не сохранён: файл только для чтения. Снимите галочку «Только чтение» в свойствах файла",
+    "access denied": "Поворот не сохранён: нет прав на запись в эту папку",
+    "corrupt EXIF": "Поворот не сохранён: метаданные файла повреждены",
+    "animated PNG": "Поворот не сохранён: анимированные PNG не поддерживаются"
+  };
+
+  // Поворот сразу виден и сразу уходит в файл: команда без задержки и без
+  // очереди, Rust доведёт её до конца, даже если окно закроют и страница
+  // перезагрузится. Повороты складываются, порядок выполнения неважен.
+  function rotateBy(delta){
+    if (!ready) return;
+    quarterTurns = (quarterTurns + delta + 4) % 4;
+    viewTurns += delta;
+    updateNatural();
+    $("fileSize").textContent = natural.w + " × " + natural.h;
+    stage.classList.add("turning");
+    clearTimeout(turnTimer);
+    turnTimer = setTimeout(function(){ stage.classList.remove("turning"); }, 200);
+    resetView();
+    if (tauri && currentPath){
+      onceHint("rotateHintShown", "Поворот сразу сохраняется в файл");
+      tauri.core.invoke("rotate_image", { path: currentPath, quarterTurns: delta }).catch(function(err){
+        console.error("rotate_image failed", err);
+        showNotice(ROTATE_ERRORS[err] || "Поворот не сохранён: " + err);
+      });
+    } else {
+      onceHint("noPathHintShown", "Этот файл открыт без пути — поворот виден только здесь, в файл не сохраняется");
+    }
+  }
+
   // ---------- загрузка ----------
 
   function loadFile(file, name, onLoaded){
@@ -764,7 +853,10 @@
       imgUrl = src;
       imgEl = image;
       fileName = newName;
-      natural = { w: image.naturalWidth, h: image.naturalHeight };
+      raw = { w: image.naturalWidth, h: image.naturalHeight };
+      quarterTurns = viewTurns = 0;
+      tilt = 0;
+      updateNatural();
       image.id = "img";
       image.alt = "";
       image.draggable = false;
@@ -781,15 +873,7 @@
       }
       updateChromeVisibility();
 
-      zoom = 1;
-      baseScale = computeBaseScale();
-      resizeStageTo(baseScale * zoom);
-      offX = offY = 0;
-      clampOffsets();
-
-      box = fitBox(display.w, display.h, targetW / targetH);
-      applyTransform();
-      renderBox();
+      resetView();
       updateCropVisibility();
       downloadBtn.disabled = false;
       if (firstOpen && !focusHintShown){
@@ -866,11 +950,14 @@
     loadFromPath(siblings[next], next);
   }
 
+  // Путь и папка прежнего файла забываются, только когда новый уже на экране:
+  // поворот, нажатый пока он грузится, относится к тому, что видно.
   function openLocalFile(file){
     if (!file) return;
-    clearSiblings();
-    loadFile(file);
-    updateNavButtons();
+    loadFile(file, undefined, function(){
+      clearSiblings();
+      updateNavButtons();
+    });
   }
 
   // ---------- перетаскивание рамки ----------
@@ -975,9 +1062,6 @@
       return;
     }
 
-    var scale = display.scale;
-    var sx = box.x / scale, sy = box.y / scale, sw = box.w / scale, sh = box.h / scale;
-
     var canvas = document.createElement("canvas");
     canvas.width = targetW; canvas.height = targetH;
     var ctx = canvas.getContext("2d");
@@ -988,7 +1072,14 @@
     }
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(imgEl, sx, sy, sw, sh, 0, 0, targetW, targetH);
+    // Рамка (в px stage) → холст W×H; картинка — повёрнутая вокруг центра stage.
+    // Пиксели оригинала пересчитываются один раз.
+    var t = G.cosSin(quarterTurns * 90 + tilt);
+    ctx.scale(targetW / box.w, targetH / box.h);
+    ctx.translate(display.w / 2 - box.x, display.h / 2 - box.y);
+    ctx.transform(t.c, t.s, -t.s, t.c, 0, 0);
+    ctx.scale(display.scale, display.scale);
+    ctx.drawImage(imgEl, -raw.w / 2, -raw.h / 2);
 
     var mime = format === "png" ? "image/png" : "image/jpeg";
     var ext = format === "png" ? "png" : "jpg";
@@ -1196,6 +1287,8 @@
   help.addEventListener("click", function(e){ if (e.target === help) help.classList.remove("open"); });
 
   flipBtn.addEventListener("click", function(){ setTarget(targetH, targetW); });
+  $("rotateLeftBtn").addEventListener("click", function(){ rotateBy(-1); });
+  $("rotateRightBtn").addEventListener("click", function(){ rotateBy(1); });
 
   prevBtn.addEventListener("click", function(){ goSibling(-1); });
   nextBtn.addEventListener("click", function(){ goSibling(1); });
@@ -1251,6 +1344,8 @@
     // Ctrl+S / Ctrl+O работают и из полей ввода (ы/щ — русская раскладка)
     if (e.ctrlKey && !e.altKey && (low === "s" || low === "ы")){ e.preventDefault(); download(); return; }
     if (e.ctrlKey && !e.altKey && (low === "o" || low === "щ")){ e.preventDefault(); fileInput.click(); return; }
+    // Ctrl+R — как в «Фотографиях» Windows; заодно WebView2 не перезагрузит страницу
+    if (e.ctrlKey && !e.altKey && (low === "r" || low === "к")){ e.preventDefault(); rotateBy(1); return; }
 
     var tag = document.activeElement && document.activeElement.tagName;
     if (tag === "INPUT") return;
@@ -1277,6 +1372,8 @@
     else if (low === "c" || low === "с") toggleCrop();
     else if (low === "f" || low === "а") setFocus(!focusMode);
     else if (low === "x" || low === "ч") setTarget(targetH, targetW);
+    else if (low === "r" || low === "к") rotateBy(1);
+    else if (low === "l" || low === "д") rotateBy(-1);
     else if (key === "0") fitToWindow();
     else if (key === "1") actualSize();
   });

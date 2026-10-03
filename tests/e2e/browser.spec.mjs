@@ -3,7 +3,7 @@
 // when the native dialog fails.
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { APP_URL, makePng, pngSize, waitForImage } from "./helpers.mjs";
+import { APP_URL, makePng, pngSize, waitForImage, QUADRANTS } from "./helpers.mjs";
 
 test.beforeEach(async ({ page }) => {
   await page.goto(APP_URL);
@@ -37,4 +37,24 @@ test("non-image files are rejected with a message", async ({ page }) => {
   await expect(page.locator("#notice")).toContainText("Это не изображение");
   await expect(page.locator("#dropzone")).toBeVisible();
   await expect(page.locator("#workspace")).toBeHidden();
+});
+
+test("in a plain browser a turn changes the view and the download, not a file", async ({ page }) => {
+  await page.setInputFiles("#fileInput", {
+    name: "photo.png",
+    mimeType: "image/png",
+    buffer: makePng(400, 300, QUADRANTS(400, 300)),
+  });
+  await waitForImage(page, 400, 300);
+  await page.keyboard.press("r");
+  await expect(page.locator("#fileSize")).toHaveText("300 × 400");
+  await expect(page.locator("#hint")).toContainText("открыт без пути");
+
+  await page.keyboard.press("Escape");
+  await page.fill("#inputW", "300");
+  await page.fill("#inputH", "400");
+  await page.locator("#inputH").blur();
+  const [download] = await Promise.all([page.waitForEvent("download"), page.click("#downloadBtn")]);
+  const buf = await readFile(await download.path());
+  expect(pngSize(buf)).toEqual({ width: 300, height: 400 });
 });
