@@ -574,6 +574,7 @@
   // считаем, в какой пиксель изображения она указывает, и после ресайза
   // подставляем смещение так, чтобы этот пиксель снова оказался под курсором.
   function applyScale(newScale, anchorClientX, anchorClientY){
+    endDrag();
     newScale = clamp(newScale, 0.01, 50);
     var oldScale = display.scale || newScale;
     var ratio = newScale / oldScale;
@@ -878,6 +879,7 @@
   // перезагрузится. Повороты складываются, порядок выполнения неважен.
   function rotateBy(delta){
     if (!ready) return;
+    endDrag();
     quarterTurns = (quarterTurns + delta + 4) % 4;
     viewTurns += delta;
     updateNatural();
@@ -931,6 +933,7 @@
   function setTilt(deg){
     deg = clamp(Math.round(deg), -MAX_TILT, MAX_TILT);
     if (!ready || deg === tilt) return;
+    endDrag();
     var s = display.scale, oldW = display.w, oldH = display.h;
     var centerX = offX + oldW / 2, centerY = offY + oldH / 2;
     var rel = { x: (box.x + box.w / 2 - oldW / 2) / s, y: (box.y + box.h / 2 - oldH / 2) / s, w: box.w / s, h: box.h / s };
@@ -1129,15 +1132,24 @@
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
+  // Поворот, наклон и зум сдвигают картинку под рамкой: тянуть дальше от
+  // прежних углов рамки и прежнего места stage нельзя — рамка уехала бы на фон.
+  // Поэтому они сначала заканчивают перетаскивание.
+  function endDrag(){
+    if (dragState) dragState.end();
+  }
+
   function startDrag(e, mode, corner){
     e.preventDefault();
     e.stopPropagation();
     closePops();
+    endDrag();
     var rect = stage.getBoundingClientRect();
     var start = getPoint(e, rect);
-    dragState = { mode: mode, corner: corner, start: start, box: { x:box.x, y:box.y, w:box.w, h:box.h } };
+    var captor = e.currentTarget, pointerId = e.pointerId;
+    dragState = { mode: mode, corner: corner, start: start, box: { x:box.x, y:box.y, w:box.w, h:box.h }, end: onUp };
     // Захват указателя: pointerup придёт, даже если кнопку отпустили за окном
-    e.currentTarget.setPointerCapture(e.pointerId);
+    captor.setPointerCapture(pointerId);
     cropBox.classList.add("drag");
 
     function onMove(ev){
@@ -1162,20 +1174,25 @@
         default: return;
       }
 
+      var r = imageRect();
       var rawW = Math.abs(p.x - anchorX);
       var rawH = Math.abs(p.y - anchorY);
       var w = Math.max(rawW, rawH * aspect);
-      var maxW = G.maxWidthFromAnchor(anchorX, anchorY, growX, growY, aspect, imageRect());
+      var maxW = G.maxWidthFromAnchor(anchorX, anchorY, growX, growY, aspect, r);
       w = clamp(w, MIN_BOX, Math.max(maxW, MIN_BOX));
       var h = w / aspect;
       var x = growX === 1 ? anchorX : anchorX - w;
       var y = growY === 1 ? anchorY : anchorY - h;
 
       box = { x:x, y:y, w:w, h:h };
+      // MIN_BOX у самого края или на крошечной картинке может выйти за неё
+      if (!G.isBoxInside(box, r)) box = G.fitInside(box, r);
       renderBox();
     }
 
     function onUp(){
+      dragState = null;
+      if (captor.hasPointerCapture(pointerId)) captor.releasePointerCapture(pointerId);
       cropBox.classList.remove("drag");
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -1204,6 +1221,9 @@
 
   function download(){
     if (!imgEl || !box) return;
+    // Последняя страховка: фон в результат попасть не может
+    var r = imageRect();
+    if (!G.isBoxInside(box, r)){ box = G.fitInside(box, r); renderBox(); }
 
     // В файл уходит ровно то, что в рамке, поэтому без видимой рамки не
     // сохраняем: сначала показываем её (выходим из фокуса), сохраняет
@@ -1378,10 +1398,20 @@
     pop.style.left = clamp(r.left + r.width / 2 - pw / 2, GAP, window.innerWidth - pw - GAP) + "px";
     pop.style.top = Math.max(GAP, above - ph - GAP) + "px";
   }
+  // Фокус внутри закрываемого поповера (линейка после нажатия на неё) уходит
+  // с него сразу, а не на следующем кадре: иначе ← → ещё крутили бы наклон, а не
+  // листали файлы. С клавиатуры (:focus-visible) — обратно на кнопку поповера;
+  // после мыши — просто снимаем: фокус на кнопке держал бы панель в фокусе видимой.
   function closePops(){
+    var a = document.activeElement, anchor = openAnchor;
+    var focusInPop = !!(a && a.closest && a.closest(".pop.open"));
+    var byKeyboard = focusInPop && a.matches(":focus-visible");
     document.querySelectorAll(".pop.open").forEach(function(p){ p.classList.remove("open"); });
     document.querySelectorAll("[aria-expanded]").forEach(function(b){ b.setAttribute("aria-expanded", "false"); });
     openAnchor = null;
+    if (!focusInPop) return;
+    if (byKeyboard && anchor && anchor.getClientRects().length) anchor.focus();
+    else a.blur();
   }
   function replaceOpenPop(){
     var p = document.querySelector(".pop.open");
@@ -1558,6 +1588,7 @@
   tiltRuler.addEventListener("dblclick", function(){ setTilt(0); });
   // Стрелки на линейке меняют угол и не уходят дальше — иначе листали бы файлы.
   tiltRuler.addEventListener("keydown", function(e){
+    if (!tiltPop.classList.contains("open")) return;   // закрытая линейка клавиши не забирает
     var step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
     if (step) setTilt(tilt + step);
     else if (e.key === "Home") setTilt(0);

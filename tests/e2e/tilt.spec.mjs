@@ -180,6 +180,47 @@ test("a tilt change shrinks the frame when it no longer fits", async ({ page }) 
   await expectFrameInside(page);
 });
 
+// A turn, tilt or zoom while a corner is held moves the picture under the
+// frame; the drag must end there, or its next move builds the frame from the
+// old position — outside the picture — and Save exports background.
+async function holdCornerDuring(page, corner, action) {
+  const bb = await page.locator(`.handle[data-corner="${corner}"]`).boundingBox();
+  const x = bb.x + bb.width / 2, y = bb.y + bb.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 20, y - 20, { steps: 3 });
+  await action(page);
+  await page.mouse.move(x + 60, y + 60, { steps: 5 });
+  await page.mouse.up();
+}
+
+const CORNERS_AND_CENTRE = [[0, 0], [0.999, 0], [0, 0.999], [0.999, 0.999], [0.5, 0.5]];
+
+// Each case is set up so that the held drag's old fixed corner (bottom-right
+// for a tl drag) is off the picture afterwards.
+const wheelTimes = (dy) => async (page) => { for (let i = 0; i < 2; i++) await page.mouse.wheel(0, dy); };
+for (const [what, setup, action] of [
+  // a landscape frame's bottom-right lies right of the turned, narrower picture
+  ["a turn (R)", null, (page) => page.keyboard.press("r")],
+  // the frame fills the picture: its corner is off it at 1°
+  ["a tilt (])", (page) => drag(page, '.handle[data-corner="br"]', 3000, 3000), (page) => page.keyboard.press("]")],
+  // zoomed in, then back out under the held corner: the picture shrinks
+  ["a wheel zoom", async (page) => {
+    const vp = await page.locator("#viewport").boundingBox();
+    await page.mouse.move(vp.x + vp.width / 2, vp.y + vp.height / 2);
+    await wheelTimes(-100)(page);
+  }, wheelTimes(100)],
+]) {
+  test(`${what} during a corner drag keeps the frame on the picture and the export free of background`, async ({ page }) => {
+    await open(page);
+    if (setup) await setup(page);
+    await holdCornerDuring(page, "tl", action);
+    await expectFrameInside(page);
+    const px = await exportPixels(page, CORNERS_AND_CENTRE);
+    expectColors(px, CORNERS_AND_CENTRE.map(() => SOLID), 10);
+  });
+}
+
 test("tilt never reaches Rust and resets on the next file", async ({ page }) => {
   await open(page, { siblings: [A, B], files: { [A]: { width: 400, height: 300, rgba: SOLID }, [B]: { width: 200, height: 100 } } });
   await pressTimes(page, "]", 2);
@@ -263,6 +304,30 @@ test.describe("the tilt ruler", () => {
     const readB = await page.evaluate((b) => window.__mockLog.invokes.some((c) => c.cmd === "read_file_bytes" && c.args.path === b), B);
     expect(readB).toBe(false);
   });
+
+  // A press on the ruler focuses it; once it is closed, ← → must page files
+  // again. The browser drops focus from a hidden element only at its next
+  // frame, so the → here comes in the same frame as the close, as a quick
+  // keypress can.
+  for (const how of ["Esc", "a click beside the picture"]) {
+    test(`after closing with ${how}, the arrows page files instead of tilting`, async ({ page }) => {
+      await open(page, { siblings: [A, B], files: { [A]: { width: 400, height: 300, rgba: SOLID }, [B]: { width: 200, height: 100 } } });
+      await page.click("#tiltBtn");
+      await page.click("#tiltRuler"); // a press without a move: the angle stays 0°
+      await expect(page.locator("#tiltRuler")).toBeFocused();
+      const after = await page.evaluate((how) => {
+        const key = (k) => (document.activeElement || document.body).dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+        if (how === "Esc") key("Escape");
+        else document.getElementById("viewport").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }));
+        const open = document.getElementById("tiltPop").classList.contains("open");
+        key("ArrowRight");
+        return { open, focused: document.activeElement.id, tilt: document.getElementById("tiltLbl").textContent };
+      }, how);
+      expect(after).toEqual({ open: false, focused: expect.not.stringMatching(/^tiltRuler$/), tilt: "0°" });
+      await expect(page.locator("#navPos")).toHaveText("2 / 2");
+      await waitForImage(page, 200, 100);
+    });
+  }
 
   test("in focus mode the bar stays visible while the ruler is open", async ({ page }) => {
     await installTauriMock(page, { initialFile: A, files: { [A]: { width: 400, height: 300, rgba: SOLID } } });
