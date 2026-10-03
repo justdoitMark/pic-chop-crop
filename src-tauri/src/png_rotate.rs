@@ -6,6 +6,17 @@
 const SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 pub const ANIMATED: &str = "animated PNG";
 pub const CORRUPT: &str = "corrupt PNG";
+pub const TOO_LARGE: &str = "image too large";
+/// Largest decoded image (bytes) we agree to hold in memory.
+const MAX_DECODED_BYTES: usize = 1 << 30;
+
+/// A zeroed buffer, or TOO_LARGE when it cannot be had (never aborts).
+fn zeroed(len: usize) -> Result<Vec<u8>, String> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(len).map_err(|_| TOO_LARGE.to_string())?;
+    v.resize(len, 0);
+    Ok(v)
+}
 
 /// One chunk: its type, its data, and the whole stored run (length, type,
 /// data, CRC) for copying as is.
@@ -63,9 +74,13 @@ struct Image {
 fn decode(bytes: &[u8]) -> Result<(Vec<u8>, Image), String> {
     let mut decoder = png::Decoder::new(bytes);
     decoder.set_transformations(png::Transformations::IDENTITY);
-    let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
-    let mut buf = vec![0; reader.output_buffer_size()];
-    let frame = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
+    let mut reader = decoder.read_info().map_err(|_| CORRUPT.to_string())?;
+    let size = reader.output_buffer_size();
+    if size > MAX_DECODED_BYTES {
+        return Err(TOO_LARGE.into());
+    }
+    let mut buf = zeroed(size)?;
+    let frame = reader.next_frame(&mut buf).map_err(|_| CORRUPT.to_string())?;
     buf.truncate(frame.buffer_size());
     let palette = reader.info().palette.as_ref().map(|p| p.to_vec());
     Ok((buf, Image { width: frame.width, height: frame.height, color: frame.color_type, depth: frame.bit_depth, palette }))
@@ -92,11 +107,11 @@ fn encode(pixels: &[u8], width: u32, height: u32, img: &Image) -> Result<Vec<u8>
 
 /// Turns packed rows (each row padded to whole bytes, as PNG stores them)
 /// `q` quarter turns clockwise. Returns the rows and the new size.
-fn turn(src: &[u8], w: usize, h: usize, bits: usize, q: u32) -> (Vec<u8>, usize, usize) {
+fn turn(src: &[u8], w: usize, h: usize, bits: usize, q: u32) -> Result<(Vec<u8>, usize, usize), String> {
     let (nw, nh) = if q % 2 == 1 { (h, w) } else { (w, h) };
     let src_row = (w * bits + 7) / 8;
     let dst_row = (nw * bits + 7) / 8;
-    let mut dst = vec![0u8; dst_row * nh];
+    let mut dst = zeroed(dst_row * nh)?;
     for ny in 0..nh {
         for nx in 0..nw {
             // the source pixel that lands on (nx, ny)
@@ -117,7 +132,7 @@ fn turn(src: &[u8], w: usize, h: usize, bits: usize, q: u32) -> (Vec<u8>, usize,
             }
         }
     }
-    (dst, nw, nh)
+    Ok((dst, nw, nh))
 }
 
 pub fn rotate_png(bytes: &[u8], quarter_turns: i32) -> Result<Vec<u8>, String> {
@@ -131,7 +146,7 @@ pub fn rotate_png(bytes: &[u8], quarter_turns: i32) -> Result<Vec<u8>, String> {
     }
     let (pixels, img) = decode(bytes)?;
     let bits = img.color.samples() * img.depth as usize;
-    let (turned, nw, nh) = turn(&pixels, img.width as usize, img.height as usize, bits, q);
+    let (turned, nw, nh) = turn(&pixels, img.width as usize, img.height as usize, bits, q)?;
     let idat = encode(&turned, nw as u32, nh as u32, &img)?;
 
     let mut out = SIGNATURE.to_vec();
@@ -329,6 +344,27 @@ mod tests {
         let src = make(1, 1, ColorType::Rgb, BitDepth::Eight, &[1, 2, 3], None, &[(b"acTL", &[0, 0, 0, 1, 0, 0, 0, 0])]);
         assert_eq!(rotate_png(&src, 1), Err(ANIMATED.to_string()));
         assert_eq!(rotate_png(b"not a png", 1), Err(CORRUPT.to_string()));
+    }
+
+    #[test]
+    fn a_huge_declared_size_is_refused_without_allocating() {
+        let mut ihdr = 60000u32.to_be_bytes().to_vec();
+        ihdr.extend_from_slice(&60000u32.to_be_bytes());
+        ihdr.extend_from_slice(&[16, 6, 0, 0, 0]); // 16-bit RGBA
+        let src = [SIGNATURE.to_vec(), chunk(b"IHDR", &ihdr), chunk(b"IDAT", &[0, 1, 2]), chunk(b"IEND", &[])].concat();
+        assert_eq!(rotate_png(&src, 1), Err(TOO_LARGE.to_string()));
+    }
+
+    #[test]
+    fn a_png_cut_in_the_middle_of_its_data_is_corrupt() {
+        let data: Vec<u8> = (0..4000u32).map(|i| (i * 7919 % 251) as u8).collect();
+        let src = make(40, 25, ColorType::Rgb, BitDepth::Eight, &data[..3000], None, &[]);
+        let idat = chunks(&src).unwrap().into_iter().find(|c| &c.kind == b"IDAT").unwrap();
+        let cut = src.len() - idat.raw.len() / 2 - 12;
+        let mut bad = src[..cut].to_vec();
+        bad.extend_from_slice(&chunk(b"IEND", &[]));
+        assert_eq!(rotate_png(&bad, 1), Err(CORRUPT.to_string()));
+        assert_eq!(rotate_png(&src[..cut], 1), Err(CORRUPT.to_string()));
     }
 
     #[test]
