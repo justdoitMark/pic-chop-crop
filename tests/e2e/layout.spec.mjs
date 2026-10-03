@@ -122,3 +122,28 @@ test.describe("short window 480x190", () => {
     expect(await page.evaluate(audit)).toEqual([]);
   });
 });
+
+// A touch screen (pointer: coarse): a taller bar and 44 px buttons, but only
+// where they fit; in a narrower window the file name would be squeezed out.
+test.describe("touch screen", () => {
+  test.use({ hasTouch: true, reducedMotion: "reduce" });
+
+  for (const { width, big } of [{ width: 1280, big: true }, { width: 681, big: true }, { width: 680, big: false }, { width: 600, big: false }]) {
+    test(`${width}x480: ${big ? "44 px targets" : "regular targets"}, everything fits`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 480 });
+      await installTauriMock(page, {
+        initialFile: A, siblings: [A, "C:\pics\b.png"],
+        files: { [A]: { width: 1600, height: 1000 } },
+      });
+      await page.goto(APP_URL);
+      await waitForImage(page, 1600, 1000);
+      await page.keyboard.press("Escape");
+      const btn = await page.locator("#rotateRightBtn").boundingBox();
+      expect([btn.width, btn.height]).toEqual(big ? [44, 40] : [30, 28]);
+      expect(await page.evaluate(audit)).toEqual([]);
+      await page.click("#tiltBtn");
+      expect((await page.locator("#tiltRuler").boundingBox()).height).toBe(big ? 52 : 44);
+      expect(await page.evaluate(audit)).toEqual([]);
+    });
+  }
+});

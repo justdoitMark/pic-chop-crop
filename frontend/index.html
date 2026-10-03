@@ -226,7 +226,9 @@
   body.focusMode #viewport{ inset:0; }
   body.focusMode #pill{ display:none; }
   body.focusMode #bar{ opacity:0; }
-  body.focusMode #bar:hover, body.focusMode #bar:focus-within{ opacity:1; }
+  /* После касания :hover «залипает» на панели — для пальца она проявляется только классом barPeek. */
+  body.focusMode:not(.touchInput) #bar:hover, body.focusMode #bar:focus-within{ opacity:1; }
+  body.focusMode.barPeek #bar{ opacity:1; }
   body.focusMode #notice, body.focusMode #hint{ bottom:22px; }
 
   /* ---------- адаптивность ---------- */
@@ -264,6 +266,13 @@
     #downloadBtn{ padding:0 10px; margin-left:2px; }
   }
   @media (max-width: 420px){ #ratioGrid{ grid-template-columns:repeat(3, 1fr); } }
+  /* Палец: цели не меньше 44 px. В окне до 680 px им не хватает места (до ~600 px имя файла
+     сжалось бы в ноль) — там остаются 30/28 px (≥ 24 px, WCAG AA). */
+  @media (pointer: coarse) and (min-width: 681px){
+    :root{ --bar:44px; }
+    #bar .iconBtn{ width:44px; height:40px; }
+    #tiltRuler{ height:52px; }
+  }
   @media (prefers-reduced-motion: reduce){ *, *::before, *::after{ animation:none !important; transition:none !important; } }
 </style>
 </head>
@@ -717,6 +726,7 @@
     cropActive = true;
     if (focusMode){
       focusMode = false;
+      setPeek(false);
       updateChromeVisibility();
       recomputeBaseScale();
     } else {
@@ -1228,13 +1238,60 @@
   function setFocus(on){
     if (!ready || focusMode === on) return;
     focusMode = on;
+    setPeek(false);
     if (!on){
       cropActive = true;          // вышли из фокуса — сразу видно, что уйдёт в файл
       hint.style.display = "none";
     }
     updateChromeVisibility();
     recomputeBaseScale();
+    replaceOpenPop();             // вернулась пилюля — линейка не должна на неё наезжать
   }
+
+  // Касание в режиме фокуса: панель прозрачна, но её кнопки нажимаются. Первый
+  // тап по верхней полосе (~1,5 см) только показывает панель, нажимает —
+  // следующий. Панель прячется через 3 с или после тапа ниже полосы.
+  var PEEK_ZONE = 56, PEEK_MS = 3000;
+  var peekTimer = null, swallowClickUntil = 0;
+  function setPeek(on){
+    document.body.classList.toggle("barPeek", on);
+    clearTimeout(peekTimer);
+    if (on) peekTimer = setTimeout(endPeek, PEEK_MS);
+  }
+  // Нажатая пальцем кнопка панели держит фокус, а с ним :focus-within — и
+  // панель не спряталась бы. Фокус с клавиатуры (:focus-visible) не трогаем.
+  function endPeek(){
+    setPeek(false);
+    var a = document.activeElement;
+    if (a && $("bar").contains(a) && !a.matches(":focus-visible")) a.blur();
+  }
+  // Панель уже видна и без barPeek: открыта линейка наклона или фокус на кнопке панели.
+  function barShown(){
+    return document.body.classList.contains("barPeek") || tiltPop.classList.contains("open") ||
+      $("bar").matches(":focus-within");
+  }
+  document.addEventListener("pointerdown", function(e){
+    document.body.classList.toggle("touchInput", e.pointerType === "touch");
+    if (e.pointerType !== "touch" || !focusMode) return;
+    swallowClickUntil = 0;   // новый тап: клик предыдущего уже прошёл
+    if (e.clientY > Math.max($("bar").offsetHeight, PEEK_ZONE)){ endPeek(); return; }
+    if (barShown()){ setPeek(true); return; }
+    e.preventDefault();
+    e.stopPropagation();
+    swallowClickUntil = Date.now() + 600;
+    setPeek(true);
+  }, true);
+  document.addEventListener("pointermove", function(e){
+    if (e.pointerType === "mouse") document.body.classList.remove("touchInput");
+  });
+  // pointerdown.preventDefault() не отменяет click — гасим его отдельно.
+  document.addEventListener("click", function(e){
+    if (Date.now() < swallowClickUntil){
+      e.preventDefault();
+      e.stopPropagation();
+      swallowClickUntil = 0;
+    }
+  }, true);
 
   function toggleCrop(){
     if (!ready) return;

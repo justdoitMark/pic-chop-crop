@@ -274,3 +274,76 @@ test.describe("the tilt ruler", () => {
     await expect(page.locator("#bar")).toHaveCSS("opacity", "1");
   });
 });
+
+test("leaving focus mode with the ruler open moves it off the pill", async ({ page }) => {
+  // A low window: in focus mode the ruler may reach down to the window edge;
+  // once the pill is back it must stop above it.
+  await page.setViewportSize({ width: 800, height: 190 });
+  await installTauriMock(page, { initialFile: A, files: { [A]: { width: 400, height: 300, rgba: SOLID } } });
+  await page.goto(APP_URL);
+  await waitForImage(page, 400, 300); // opens in focus mode
+  await page.click("#tiltBtn");
+  await expect(page.locator("#tiltPop")).toBeVisible();
+  await page.keyboard.press("f"); // leave focus mode, the ruler stays open
+  await expect(page.locator("body")).not.toHaveClass(/\bfocusMode\b/);
+  await expect(page.locator("#tiltPop")).toBeVisible();
+  const pop = await page.locator("#tiltPop").boundingBox();
+  const pill = await page.locator("#pill").boundingBox();
+  expect(pop.y + pop.height).toBeLessThanOrEqual(pill.y);
+});
+
+test.describe("touch in focus mode", () => {
+  test.use({ hasTouch: true });
+
+  test("the first tap on the hidden bar only reveals it; the next one presses", async ({ page }) => {
+    await installTauriMock(page, { initialFile: A, files: { [A]: { width: 400, height: 300, rgba: SOLID } } });
+    await page.goto(APP_URL);
+    await waitForImage(page, 400, 300); // opens in focus mode, bar transparent
+    const bb = await page.locator("#rotateRightBtn").boundingBox();
+    const tap = () => page.touchscreen.tap(bb.x + bb.width / 2, bb.y + bb.height / 2);
+
+    await tap();
+    await expect(page.locator("body")).toHaveClass(/\bbarPeek\b/);
+    expect(await page.evaluate(() => window.__mockLog.rotations)).toEqual([]);
+
+    await tap();
+    await page.waitForFunction(() => window.__mockLog.rotations.length === 1);
+
+    await expect(page.locator("body")).not.toHaveClass(/\bbarPeek\b/, { timeout: 4000 });
+    // really hidden: neither the pressed button's focus nor the hover a tap leaves behind keeps it
+    await expect(page.locator("#bar")).toHaveCSS("opacity", "0");
+    await tap(); // hidden again, so this tap only reveals it
+    await expect(page.locator("body")).toHaveClass(/\bbarPeek\b/);
+    expect(await page.evaluate(() => window.__mockLog.rotations.length)).toBe(1);
+  });
+
+  test("a tap on the picture below hides the revealed bar", async ({ page }) => {
+    await installTauriMock(page, { initialFile: A, files: { [A]: { width: 400, height: 300, rgba: SOLID } } });
+    await page.goto(APP_URL);
+    await waitForImage(page, 400, 300);
+    await page.touchscreen.tap(640, 10);
+    await expect(page.locator("body")).toHaveClass(/\bbarPeek\b/);
+    await page.touchscreen.tap(640, 400);
+    await expect(page.locator("body")).not.toHaveClass(/\bbarPeek\b/);
+    await expect(page.locator("#bar")).toHaveCSS("opacity", "0");
+  });
+
+  test("taps are never swallowed while the open ruler keeps the bar visible", async ({ page }) => {
+    // A narrow window: the 44 px touch sizes are off, so the ruler starts right under the 36 px bar.
+    await page.setViewportSize({ width: 540, height: 600 });
+    await installTauriMock(page, { initialFile: A, files: { [A]: { width: 400, height: 300, rgba: SOLID } } });
+    await page.goto(APP_URL);
+    await waitForImage(page, 400, 300); // focus mode
+    await page.click("#tiltBtn"); // mouse: the bar is not hidden from it
+    await page.locator("#tiltRuler").focus(); // the bar no longer holds focus; the open ruler keeps it visible
+    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished))); // popIn slides the ruler
+    const plus = await page.locator("#tiltPlus").boundingBox();
+    expect(plus.y).toBeLessThan(56); // the button's top edge lies in the strip (PEEK_ZONE)
+    await page.touchscreen.tap(plus.x + plus.width / 2, plus.y + 0.5);
+    await expect(page.locator("#tiltValue")).toHaveText("+1°");
+
+    const rot = await page.locator("#rotateRightBtn").boundingBox();
+    await page.touchscreen.tap(rot.x + rot.width / 2, rot.y + rot.height / 2);
+    await page.waitForFunction(() => window.__mockLog.rotations.length === 1); // the first tap pressed
+  });
+});
