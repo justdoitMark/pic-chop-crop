@@ -70,14 +70,18 @@ async function drag(page, selector, dx, dy) {
 
 test("] and [ change the angle; the button turns cyan away from 0°", async ({ page }) => {
   await open(page);
+  await expect(page.locator("#tiltBtn")).toHaveAttribute("aria-label", "Наклон, 0 градусов");
+  await expect(page.locator("#tiltBtn")).toHaveAttribute("title", "Наклон (клавиши [ и ]). Только для сохраняемой обрезки");
   await page.keyboard.press("]");
   await expect(page.locator("#tiltLbl")).toHaveText("+1°");
   await expect(page.locator("#tiltBtn")).toHaveClass(/\bon\b/);
+  await expect(page.locator("#tiltBtn")).toHaveAttribute("aria-label", "Наклон, плюс 1 градус"); // the angle reaches screen readers
   await page.keyboard.press("[");
   await expect(page.locator("#tiltLbl")).toHaveText("0°");
   await expect(page.locator("#tiltBtn")).not.toHaveClass(/\bon\b/);
   await page.keyboard.press("[");
   await expect(page.locator("#tiltLbl")).toHaveText("−1°");
+  await expect(page.locator("#tiltBtn")).toHaveAttribute("aria-label", "Наклон, минус 1 градус");
   await press(page, "ъ");
   await expect(page.locator("#tiltLbl")).toHaveText("0°");
   await press(page, "х");

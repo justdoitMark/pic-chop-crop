@@ -30,7 +30,7 @@ cargo test --manifest-path src-tauri/Cargo.toml  # Rust unit tests
   - `rotate.spec.mjs` (quarter turns, saving, Ctrl+O), `tilt.spec.mjs` (tilt, ruler, touch), `exif.spec.mjs` (the engine honours our Orientation tag), `geometry.spec.mjs` (Node only).
   - `layout.spec.mjs` checks that nothing leaves the window (popovers, pill, dimension labels) at viewports matching common monitor × Windows-scale combinations, down to a 320×240 window (the window has no minimum size).
   - Set `APP_URL` to run the suite against a modified copy of the page, e.g. to confirm a test fails when a fix is reverted.
-- **Rust** (`#[cfg(test)] mod tests` in `main.rs`): calls the commands directly as plain functions, using real temp dirs.
+- **Rust** (`#[cfg(test)] mod tests` in `main.rs`, `exif.rs`, `png_rotate.rs` and `rotate.rs`): calls the commands and helpers directly as plain functions, using real temp dirs.
 - **CI**: `.github/workflows/test.yml` runs both suites on every push and PR.
 - There is no linter and no JS build step.
 

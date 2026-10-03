@@ -918,6 +918,7 @@
     tiltBtn.classList.toggle("on", tilt !== 0);
     tiltRuler.setAttribute("aria-valuenow", String(tilt));
     tiltRuler.setAttribute("aria-valuetext", tiltSpoken(tilt));
+    tiltBtn.setAttribute("aria-label", "Наклон, " + tiltSpoken(tilt));
     $("tiltScale").style.transform = "translateX(" + (-(tilt + MAX_TILT) * PX_PER_DEG) + "px)";
   }
 
