@@ -199,6 +199,13 @@ test.describe("the tilt ruler", () => {
     await expect(page.locator("#tiltBtn")).toHaveAttribute("aria-expanded", "true");
     await page.keyboard.press("Escape");
     await expect(page.locator("#tiltPop")).toBeHidden();
+    await expect(page.locator("#tiltBtn")).toHaveAttribute("aria-expanded", "false");
+    // a second click on the angle button closes the ruler too
+    await page.click("#tiltBtn");
+    await expect(page.locator("#tiltPop")).toBeVisible();
+    await page.click("#tiltBtn");
+    await expect(page.locator("#tiltPop")).toBeHidden();
+    await expect(page.locator("#tiltBtn")).toHaveAttribute("aria-expanded", "false");
   });
 
   test("dragging the scale changes the angle by whole degrees", async ({ page }) => {
@@ -225,6 +232,19 @@ test.describe("the tilt ruler", () => {
     await expect(page.locator("#tiltValue")).toHaveText("+1°");
     await page.click("#tiltReset");
     await expect(page.locator("#tiltValue")).toHaveText("0°");
+  });
+
+  test("the wheel turns one degree per notch, not per event, and ignores sideways scroll", async ({ page }) => {
+    await open(page);
+    await page.click("#tiltBtn");
+    const bb = await page.locator("#tiltRuler").boundingBox();
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -10); // a touchpad: many small events
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await expect(page.locator("#tiltValue")).toHaveText("+1°"); // 50 px of scroll is one degree, not five
+    await page.mouse.wheel(100, 0); // sideways swipe or Shift+wheel: deltaY is 0
+    await page.mouse.wheel(0, -100); // one notch up
+    await expect(page.locator("#tiltValue")).toHaveText("+2°"); // the sideways scroll did not count as −1°
   });
 
   test("keyboard on the ruler, announced for screen readers, without paging files", async ({ page }) => {

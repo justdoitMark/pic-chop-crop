@@ -107,3 +107,18 @@ for (const size of SIZES) {
     });
   });
 }
+
+// A window so short that the ruler's natural height does not fit between the
+// bar and the pill: the ruler gets shorter (and scrolls) instead of covering it.
+test.describe("short window 480x190", () => {
+  test.use({ viewport: { width: 480, height: 190 }, reducedMotion: "reduce" });
+
+  test("tilt ruler never covers the pill", async ({ page }) => {
+    await installTauriMock(page, { initialFile: A, files: { [A]: { width: 1600, height: 1000 } } });
+    await page.goto(APP_URL);
+    await waitForImage(page, 1600, 1000);
+    await page.keyboard.press("Escape");
+    await page.click("#tiltBtn");
+    expect(await page.evaluate(audit)).toEqual([]);
+  });
+});

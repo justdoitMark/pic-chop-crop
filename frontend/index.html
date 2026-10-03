@@ -462,6 +462,8 @@
   var MAX_TILT = 45;
   var PX_PER_DEG = 8;       // то же, что --deg в CSS линейки
   var SNAP_ZERO = 0.8;      // у нуля линейка «примагничивается»: 0° шире, чем ±0,5°
+  var WHEEL_STEP_PX = 40;   // столько прокрутки колесом над линейкой — 1° (щелчок колеса — 100–120)
+  var WHEEL_LINE_PX = 40, WHEEL_PAGE_PX = 800;   // deltaMode 1 (строки) и 2 (страницы) в пикселях
   var gridTimer = null;
   var tiltBtn = $("tiltBtn");
   var tiltPop = $("tiltPop"), tiltRuler = $("tiltRuler");
@@ -1253,13 +1255,18 @@
     placePop(pop, btn);
   }
   // Поповер пилюли — над ней и никогда не выше окна: высота ограничена
-  // свободным местом. Линейка наклона (data-place="below") — под строкой статуса.
+  // свободным местом. Линейка наклона (data-place="below") — под строкой статуса
+  // и не ниже пилюли (в фокусе пилюли нет — не ниже окна); остаток прокручивается.
   function placePop(pop, btn){
     var r = btn.getBoundingClientRect(), pw;
     if (pop.getAttribute("data-place") === "below"){
+      var top = $("bar").getBoundingClientRect().bottom + GAP;
+      var pr = pill.getBoundingClientRect();
+      var limit = pr.height ? pr.top : window.innerHeight;
+      pop.style.maxHeight = Math.max(0, limit - GAP - top) + "px";
       pw = pop.offsetWidth;
       pop.style.left = clamp(r.left + r.width / 2 - pw / 2, GAP, window.innerWidth - pw - GAP) + "px";
-      pop.style.top = $("bar").getBoundingClientRect().bottom + GAP + "px";
+      pop.style.top = top + "px";
       return;
     }
     var above = pill.getBoundingClientRect().top;
@@ -1432,9 +1439,19 @@
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
   });
+  // Колесо: градус на щелчок, а не на событие. Тачпад шлёт десятки мелких
+  // событий — копим прокрутку и шагаем на 1°, когда набралось WHEEL_STEP_PX.
+  // Прокрутка вбок (deltaY = 0, Shift+колесо) угол не трогает.
+  var wheelAcc = 0;
   tiltRuler.addEventListener("wheel", function(e){
     e.preventDefault();
-    setTilt(tilt + (e.deltaY < 0 ? 1 : -1));
+    if (!e.deltaY) return;
+    var dy = e.deltaY * (e.deltaMode === 1 ? WHEEL_LINE_PX : e.deltaMode === 2 ? WHEEL_PAGE_PX : 1);
+    if (wheelAcc && (wheelAcc < 0) !== (dy < 0)) wheelAcc = 0;   // сменили направление — начинаем заново
+    wheelAcc += dy;
+    if (Math.abs(wheelAcc) < WHEEL_STEP_PX) return;
+    setTilt(tilt + (wheelAcc < 0 ? 1 : -1));
+    wheelAcc = 0;
   }, { passive: false });
   tiltRuler.addEventListener("dblclick", function(){ setTilt(0); });
   // Стрелки на линейке меняют угол и не уходят дальше — иначе листали бы файлы.
