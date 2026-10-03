@@ -170,7 +170,9 @@ test.describe("Ctrl+O opens through the native dialog", () => {
     await waitForImage(page, 400, 300);
     await page.keyboard.press("Control+o");
     await waitForImage(page, 200, 100);
-    expect(await page.evaluate(() => window.__mockLog.opens)).toHaveLength(1);
+    const opens = await page.evaluate(() => window.__mockLog.opens);
+    expect(opens).toHaveLength(1);
+    expect(opens[0]).toMatchObject({ multiple: false, directory: false, filters: [{ name: "Изображения", extensions: ["jpg", "jpeg", "png"] }] });
     await expect(page.locator("#navPos")).toHaveText("2 / 2");
     await page.keyboard.press("r");
     expect(await rotations(page)).toEqual([{ path: B, quarterTurns: 1 }]);
@@ -219,5 +221,29 @@ test.describe("Ctrl+O opens through the native dialog", () => {
     await waitForImage(page, 200, 100);
     expect(await rotations(page)).toEqual([{ path: A, quarterTurns: 1 }]);
     await expect(page.locator("#navPos")).toHaveText("2 / 2");
+  });
+  test("a second request while the dialog is open does not stack another dialog", async ({ page }) => {
+    await openWith(page, { initialFile: A, siblings: [A, B], files, openResult: B, openDelayMs: 300 });
+    await waitForImage(page, 400, 300);
+    // all four requests land within the 300 ms the first dialog stays open
+    await page.keyboard.press("Control+o");
+    await page.keyboard.press("Control+o");
+    await page.evaluate(() => { const b = document.getElementById("openBtn"); b.click(); b.click(); });
+    await waitForImage(page, 200, 100);
+    expect(await page.evaluate(() => window.__mockLog.opens)).toHaveLength(1);
+    // once it has answered, the next request opens a dialog again
+    await page.keyboard.press("Control+o");
+    await page.waitForFunction(() => window.__mockLog.opens.length === 2);
+  });
+
+  test("a failed folder listing keeps the path, so turns are still saved", async ({ page }) => {
+    await openWith(page, { initialFile: A, siblings: [A, B], files, openResult: B, siblingsError: "denied" });
+    await waitForImage(page, 400, 300);
+    await page.keyboard.press("Control+o");
+    await waitForImage(page, 200, 100);
+    await page.waitForFunction(() => window.__mockLog.invokes.filter((i) => i.cmd === "list_siblings").length === 2);
+    await page.keyboard.press("r");
+    expect(await rotations(page)).toEqual([{ path: B, quarterTurns: 1 }]);
+    await expect(page.locator("#navRow")).toBeHidden();
   });
 });

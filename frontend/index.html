@@ -1062,7 +1062,7 @@
       updateNavButtons();
     }).catch(function(){
       if (seq !== siblingsSeq) return;
-      clearSiblings();
+      forgetSiblings(); // no Prev/Next, but the file keeps its path: turns still save
       updateNavButtons();
     });
   }
@@ -1099,13 +1099,17 @@
   // сохраняется в файл и работает Prev/Next по папке. В браузере — <input>.
   // Как и openLocalFile, трогает путь и папку прежнего файла, только когда
   // выбранный уже на экране; если он не открылся, прежний остаётся как был.
+  var choosing = false; // a native dialog is open: a second one must not stack on it
   function chooseFile(){
     if (!(tauri && tauri.dialog && tauri.dialog.open)){ fileInput.click(); return; }
+    if (choosing) return;
+    choosing = true;
     tauri.dialog.open({
       multiple: false,
       directory: false,
       filters: [{ name: "Изображения", extensions: ["jpg", "jpeg", "png"] }]
     }).then(function(path){
+      choosing = false;
       if (!path) return; // отмена
       loadFromPath(path, undefined, undefined, function(){
         forgetSiblings();
@@ -1113,6 +1117,7 @@
         initSiblings(path);
       });
     }, function(err){
+      choosing = false;
       console.error("open dialog failed, falling back", err);
       fileInput.click();
     });

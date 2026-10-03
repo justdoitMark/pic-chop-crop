@@ -150,6 +150,8 @@ export function withOrientation(jpeg, value) {
  * writeError: if set, write_file_bytes rejects with it
  * rotateError: if set, rotate_image rejects with it
  * openResult: path the "Open" dialog returns (default null = cancelled)
+ * openDelayMs: the "Open" dialog answers only after this many ms (default 0)
+ * siblingsError: if set, list_siblings rejects with it
  *
  * rotate_image keeps each file's turns in sessionStorage (it survives the
  * reload that closing the window does), and read_file_bytes then serves the
@@ -177,6 +179,8 @@ export async function installTauriMock(page, opts) {
     writeError: opts.writeError ?? null,
     rotateError: opts.rotateError ?? null,
     openResult: opts.openResult ?? null,
+    openDelayMs: opts.openDelayMs ?? 0,
+    siblingsError: opts.siblingsError ?? null,
   };
 
   await page.addInitScript((cfg) => {
@@ -196,6 +200,7 @@ export async function installTauriMock(page, opts) {
             case "get_initial_file":
               return Promise.resolve(cfg.initialFile);
             case "list_siblings":
+              if (cfg.siblingsError) return Promise.reject(cfg.siblingsError);
               return Promise.resolve(cfg.siblings);
             case "app_ready":
               return Promise.resolve(null);
@@ -235,7 +240,7 @@ export async function installTauriMock(page, opts) {
         },
         open(options) {
           log.opens.push(options);
-          return Promise.resolve(cfg.openResult);
+          return later(cfg.openDelayMs, () => cfg.openResult);
         },
       },
     };
