@@ -37,15 +37,20 @@
     return { u: dx * t.c + dy * t.s, v: -dx * t.s + dy * t.c };
   }
 
-  function isBoxInside(box, rect){
+  // Проверка, что все углы рамки внутри картинки. eps — допуск на выход за границу.
+  function inside(box, rect, eps){
     var xs = [box.x, box.x + box.w], ys = [box.y, box.y + box.h];
     for (var i = 0; i < 2; i++){
       for (var j = 0; j < 2; j++){
         var p = toImage(xs[i], ys[j], rect);
-        if (Math.abs(p.u) > rect.w / 2 + EPS || Math.abs(p.v) > rect.h / 2 + EPS) return false;
+        if (Math.abs(p.u) > rect.w / 2 + eps || Math.abs(p.v) > rect.h / 2 + eps) return false;
       }
     }
     return true;
+  }
+
+  function isBoxInside(box, rect){
+    return inside(box, rect, EPS);
   }
 
   // Ближайшее положение рамки того же размера, при котором она вся на картинке.
@@ -73,20 +78,18 @@
   // Наибольшая ширина рамки, растягиваемой из неподвижного угла (ax, ay) в
   // сторону growX/growY (±1). Бинарный поиск: при наклоне край картинки не
   // параллелен рамке, и формула зависит от того, какой угол упрётся первым.
+  // Ищем с eps=0 (точная граница), чтобы результат был консервативен.
   function maxWidthFromAnchor(ax, ay, growX, growY, aspect, rect){
     function boxOf(w){
       var h = w / aspect;
       return { x: growX > 0 ? ax : ax - w, y: growY > 0 ? ay : ay - h, w: w, h: h };
     }
-    if (!isBoxInside(boxOf(0), rect)) return 0;
+    if (!inside(boxOf(0), rect, 0)) return 0;
     var lo = 0, hi = rect.w + rect.h;
-    for (var i = 0; i < 60; i++){
+    for (var i = 0; i < 40; i++){
       var mid = (lo + hi) / 2;
-      if (isBoxInside(boxOf(mid), rect)) lo = mid; else hi = mid;
+      if (inside(boxOf(mid), rect, 0)) lo = mid; else hi = mid;
     }
-    // Eliminate floating-point noise if very close to an integer
-    var nearestInt = Math.round(lo);
-    if (Math.abs(lo - nearestInt) < 2e-6) return nearestInt;
     return lo;
   }
 
