@@ -2470,7 +2470,7 @@ dependencies = [
 
 [[package]]
 name = "pic-chop-crop"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "crc32fast",
