@@ -2,7 +2,8 @@
 // Frontend (frontend/index.html) does all the cropping/resampling work on
 // a <canvas>, same as the web version. Rust's only job here is the stuff a
 // browser can't do: read the file the OS handed us on launch, list its
-// siblings for Prev/Next, and write the exported image back to disk.
+// siblings for Prev/Next, write the exported image, and save a quarter turn into the original
+// (rotate.rs).
 //
 // Starting WebView2 costs ~0.6 s, so the app stays resident: closing the
 // window only hides it (tray menu → "Выход" quits), and a second launch from
@@ -24,6 +25,7 @@ use tauri::{AppHandle, Manager, State, WebviewWindow, WindowEvent};
 
 mod exif;
 mod png_rotate;
+mod rotate;
 
 fn mime_for(path: &Path) -> Option<&'static str> {
     match path
@@ -79,6 +81,7 @@ fn natural_cmp(a: &str, b: &str) -> Ordering {
 fn read_image(path: &str) -> Result<Vec<u8>, String> {
     let p = Path::new(path);
     mime_for(p).ok_or_else(|| "unsupported file type".to_string())?;
+    let _guard = rotate::lock(); // a turn being saved finishes first
     fs::read(p).map_err(|e| e.to_string())
 }
 
@@ -184,7 +187,16 @@ async fn list_siblings(path: String) -> Result<Vec<String>, String> {
 #[tauri::command]
 fn write_file_bytes(path: String, data_base64: String) -> Result<(), String> {
     let bytes = STANDARD.decode(data_base64).map_err(|e| e.to_string())?;
+    let _guard = rotate::lock(); // the user may save over the file being turned
     fs::write(&path, bytes).map_err(|e| e.to_string())
+}
+
+/// Saves a quarter turn into the file: EXIF Orientation for JPEG (the image
+/// data is not touched), a lossless pixel turn for PNG. Runs to the end even
+/// if the window closes and the page reloads meanwhile.
+#[tauri::command]
+async fn rotate_image(path: String, quarter_turns: i32) -> Result<(), String> {
+    rotate::rotate_file(Path::new(&path), quarter_turns)
 }
 
 #[cfg(test)]
@@ -446,7 +458,8 @@ fn main() {
             read_file_bytes,
             app_ready,
             list_siblings,
-            write_file_bytes
+            write_file_bytes,
+            rotate_image
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pic Chop Crop");
