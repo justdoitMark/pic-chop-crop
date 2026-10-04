@@ -48,7 +48,7 @@ SUSPECT_LOW, SUSPECT_HIGH = 0.002, 0.998
 
 CSV_FIELDS = [
     "machine", "gpu", "model", "precision", "provider", "photo", "width", "height",
-    "session_ms", "first_ms", "warm_ms", "infer_ms", "rss_mb", "fg_share",
+    "session_ms", "first_ms", "warm_ms", "infer_ms", "rss_mb", "commit_mb", "fg_share",
     "sigmoid", "suspect", "arena", "error",
 ]
 PIL_RESAMPLE = {0: Image.Resampling.NEAREST, 1: Image.Resampling.LANCZOS,
@@ -173,8 +173,10 @@ def run_one(args):
                        suspect=not (SUSPECT_LOW <= fg <= SUSPECT_HIGH))
         except Exception as exc:
             row["error"] = str(exc)[:300]
+        mem = proc.memory_info()
+        # peak_wset: peak RAM in use; peak_pagefile: peak private commit (RAM + swap).
         row.update(first_ms=first_ms, warm_ms=warm_ms,
-                   rss_mb=round(proc.memory_info().peak_wset / 1e6))
+                   rss_mb=round(mem.peak_wset / 1e6), commit_mb=round(mem.peak_pagefile / 1e6))
         rows.append(row)
         print(f"  {photo.name}: {row.get('infer_ms')} ms fg={row.get('fg_share')} "
               f"{'SUSPECT ' if row.get('suspect') else ''}{row.get('error', '')}", flush=True)

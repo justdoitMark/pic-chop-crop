@@ -42,15 +42,21 @@ peak memory and first-load time) with a 10-minute limit, and appends rows to
 ## Rust `ort` (stage D)
 
 GNU toolchain works through `load-dynamic` (no link step against ONNX Runtime).
+`libloading` needs `dlltool`, so a full MinGW (e.g. WinLibs) goes first in PATH.
 Build outside any path with `&` in it:
 
 ```powershell
+$env:PATH = "C:\ClaudeUser\mingw64\bin;$env:PATH"    # wherever WinLibs lives
 $env:CARGO_TARGET_DIR = "C:\pcc-target"
 cargo build --release --manifest-path rs\Cargo.toml
 Copy-Item dll\*.dll C:\pcc-target\release\    # DirectML.dll must sit next to the exe
 C:\pcc-target\release\bg-remove-rs.exe models\<key>\onnx\<file>.onnx photos\<photo> out\rs\<photo>.mask.png [--cpu]
 .\.venv\Scripts\python compare.py out\rs <run>                 # share of pixels off by > 8/255
+powershell -File ab_time.ps1 -Model isnet -Provider dml        # Rust vs Python, alternating rounds
 ```
+
+The first DirectML session of a new exe compiles shaders (~1 min on Iris Xe);
+time the second run.
 
 `dll/` holds `onnxruntime.dll` from NuGet `Microsoft.ML.OnnxRuntime.DirectML` 1.24.4
 and `DirectML.dll` from `Microsoft.AI.DirectML` 1.15.4 (`bin/x64-win`).

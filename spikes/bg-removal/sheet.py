@@ -137,7 +137,8 @@ TEMPLATE = r"""<!doctype html>
 Клик по картинке — увеличение 1:1 на краю предмета; там ←/→ — соседняя колонка на том же месте, W/B/C — белый/чёрный/шахматка, Esc — закрыть.
 Оценки сохраняются в этом браузере; в конце нажмите «Сохранить ratings.json» и положите файл в <code>spikes/bg-removal/out/</code> (или скопируйте текст из поля).</p>
 <table id="t"></table>
-<div class="bar"><span id="count"></span><button id="save">Сохранить ratings.json</button><textarea id="json" readonly></textarea></div>
+<div class="bar"><span id="count"></span><button id="save">Сохранить ratings.json</button>
+  <details><summary>Текст для копирования (раскрывает названия колонок — открывать после оценки)</summary><textarea id="json" readonly></textarea></details></div>
 <div id="zoom"><div class="head"><span id="ztitle"></span>
   <button data-v="w">W белый</button><button data-v="b">B чёрный</button><button data-v="c">C шахматка</button>
   <button id="zclose">Esc закрыть</button></div><div class="view" id="zview"><img id="zimg" alt=""></div></div>
