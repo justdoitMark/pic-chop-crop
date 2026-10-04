@@ -1,0 +1,8 @@
+# Private photos, downloaded models, run output and runtime DLLs never go to git
+photos/
+models/
+out/
+dll/
+rs/target/
+.venv/
+__pycache__/

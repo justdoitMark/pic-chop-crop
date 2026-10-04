@@ -1,0 +1,6 @@
+onnxruntime-directml==1.24.4
+numpy
+pillow
+psutil
+huggingface_hub
+pymatting
