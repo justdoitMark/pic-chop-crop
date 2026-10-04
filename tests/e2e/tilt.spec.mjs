@@ -133,6 +133,26 @@ test("dragging and resizing keep the frame inside the tilted image", async ({ pa
   }
 });
 
+// With the opposite corner pinned, the corner next to it hits the tilted edge
+// at once (at 0° the edges are parallel, so this never happens): the frame
+// pushed into a corner could not grow at all.
+for (const [corner, push] of [["bl", [3000, -3000]], ["tr", [-3000, 3000]], ["br", [-3000, -3000]], ["tl", [3000, 3000]]]) {
+  test(`at 2° a frame pushed into a corner still grows to full size from the ${corner} handle`, async ({ page }) => {
+    await open(page);
+    await pressTimes(page, "]", 2);
+    await drag(page, `.handle[data-corner="${corner}"]`, corner.includes("r") ? -80 : 80, corner.includes("b") ? -80 : 80); // shrink
+    await drag(page, "#cropBox", push[0], push[1]);
+    const before = (await frameState(page)).box.w;
+    await drag(page, `.handle[data-corner="${corner}"]`, corner.includes("r") ? 3000 : -3000, corner.includes("b") ? 3000 : -3000);
+    const { box, rect } = await frameState(page);
+    const max = G.maxBoxSize(box.w / box.h, rect);
+    expect(box.w).toBeGreaterThan(before);
+    expect(box.w).toBeGreaterThan(max.w * 0.99);
+    expect(box.w / box.h).toBeCloseTo(16 / 9, 2);
+    await expectFrameInside(page);
+  });
+}
+
 test("zoom and window resize keep the frame inside", async ({ page }) => {
   await open(page);
   await pressTimes(page, "]", 20);

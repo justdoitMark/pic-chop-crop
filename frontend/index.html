@@ -1180,12 +1180,19 @@
       var rawH = Math.abs(p.y - anchorY);
       var w = Math.max(rawW, rawH * aspect);
       var maxW = G.maxWidthFromAnchor(anchorX, anchorY, growX, growY, aspect, r);
+      // При наклоне соседний с якорем угол упирается в косой край сразу —
+      // рамка у края не росла бы вовсе. Тогда растём дальше, до наибольшей
+      // рамки, что помещается, и сдвигаем её от края. При 0° края параллельны,
+      // и поведение прежнее.
+      var slide = tilt !== 0 && w > maxW;
+      if (slide) maxW = Math.max(maxW, G.maxBoxSize(aspect, r).w);
       w = clamp(w, MIN_BOX, Math.max(maxW, MIN_BOX));
       var h = w / aspect;
       var x = growX === 1 ? anchorX : anchorX - w;
       var y = growY === 1 ? anchorY : anchorY - h;
 
       box = { x:x, y:y, w:w, h:h };
+      if (slide) box = G.clampBoxCenter(box, r);
       // MIN_BOX у самого края или на крошечной картинке может выйти за неё
       if (!G.isBoxInside(box, r)) box = G.fitInside(box, r);
       renderBox();
