@@ -106,8 +106,11 @@ def make_session(model_path, provider, arena=True):
     import onnxruntime as ort
     opts = ort.SessionOptions()
     opts.log_severity_level = ORT_LOG_ERRORS_ONLY
-    # The CPU arena keeps freed blocks for reuse; off, peak memory may drop.
+    # The CPU arena keeps freed blocks for reuse and the memory pattern
+    # pre-plans one big block; with both off, BiRefNet fits a 16 GB laptop.
     opts.enable_cpu_mem_arena = arena
+    if not arena:
+        opts.enable_mem_pattern = False
     if provider == "DmlExecutionProvider":
         # DirectML does not support memory patterns or parallel execution.
         opts.enable_mem_pattern = False

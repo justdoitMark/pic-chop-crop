@@ -1,4 +1,4 @@
-//! bg-remove-rs <model.onnx> <photo> <out_mask.png> [--cpu]
+//! bg-remove-rs <model.onnx> <photo> <out_mask.png> [--cpu [--no-arena]]
 //!
 //! The same pipeline as bench.py, through Rust `ort` with load-dynamic:
 //! EXIF-aware open -> resize to the model input -> rescale/normalize from the
@@ -83,9 +83,16 @@ fn to_input(img: &DynamicImage, p: &Preprocess) -> Array4<f32> {
     x
 }
 
-fn make_session(model: &Path, cpu: bool) -> ort::Result<Session> {
+fn make_session(model: &Path, cpu: bool, no_arena: bool) -> ort::Result<Session> {
     let mut builder = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)?;
+    if cpu && no_arena {
+        // Without the arena (and the pre-planned memory pattern) BiRefNet fits
+        // a 16 GB laptop instead of swapping or failing with bad_alloc.
+        builder = builder
+            .with_memory_pattern(false)?
+            .with_execution_providers([ep::CPU::default().with_arena_allocator(false).build()])?;
+    }
     if !cpu {
         // DirectML supports neither memory patterns nor parallel execution.
         builder = builder
@@ -163,9 +170,10 @@ fn dylib_path() -> Result<PathBuf> {
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cpu = args.iter().any(|a| a == "--cpu");
+    let no_arena = args.iter().any(|a| a == "--no-arena");
     let pos: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     let [model, photo, out] = pos.as_slice() else {
-        bail!("usage: bg-remove-rs <model.onnx> <photo> <out_mask.png> [--cpu]");
+        bail!("usage: bg-remove-rs <model.onnx> <photo> <out_mask.png> [--cpu [--no-arena]]");
     };
     let (model, photo, out) = (Path::new(model), Path::new(photo), Path::new(out));
 
@@ -179,7 +187,7 @@ fn main() -> Result<()> {
     let x = to_input(&img, &prep);
 
     let t = Instant::now();
-    let mut session = make_session(model, cpu).map_err(|e| anyhow!("session: {e}"))?;
+    let mut session = make_session(model, cpu, no_arena).map_err(|e| anyhow!("session: {e}"))?;
     let session_ms = ms(t);
 
     let t = Instant::now();
