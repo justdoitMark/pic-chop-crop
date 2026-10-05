@@ -125,7 +125,7 @@ TEMPLATE = r"""<!doctype html>
   .bar textarea { width: 32em; height: 3em; font: 11px monospace; }
   #zoom { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; flex-direction: column; z-index: 10; }
   #zoom.open { display: flex; }
-  #zoom .head { color: #fff; padding: 8px 12px; display: flex; gap: 16px; align-items: center; }
+  #zoom .head { color: #fff; background: #222; padding: 8px 12px; display: flex; gap: 16px; align-items: center; }
   #zoom .head button { padding: 4px 10px; }
   #zoom .view { flex: 1; overflow: auto; cursor: grab; }
   #zoom .view img { display: block; max-width: none; image-orientation: from-image; }

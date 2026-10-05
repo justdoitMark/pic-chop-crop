@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import psutil
 from PIL import Image, ImageDraw, ImageFilter, ImageOps
 from pymatting import estimate_foreground_ml
 
@@ -27,7 +28,8 @@ SIZES_MP = {"12mp": (4032, 3024), "24mp": (6000, 4000)}
 
 def load_rgb(path):
     with Image.open(path) as img:
-        return np.asarray(ImageOps.exif_transpose(img).convert("RGB"), np.float64) / 255.0
+        # float32: pymatting works in float32 anyway; float64 would cost ~1 GB more per 42 MP image.
+        return np.asarray(ImageOps.exif_transpose(img).convert("RGB"), np.float32) / np.float32(255)
 
 
 def clean(image, alpha):
@@ -39,11 +41,16 @@ def clean(image, alpha):
 
 def compose(fg, alpha, ground):
     a = alpha[..., None]
-    return fg * a + np.asarray(ground, np.float64) * (1.0 - a)
+    return fg * a + np.asarray(ground, np.float32) * (1 - a)
 
 
 def to_img(arr):
     return Image.fromarray((arr * 255 + 0.5).astype(np.uint8))
+
+
+def peak_mb():
+    """Peak RAM of this process so far (it only grows: photos go smallest first)."""
+    return round(psutil.Process().memory_info().peak_wset / 1e6)
 
 
 def warm_up():
@@ -54,7 +61,7 @@ def warm_up():
 def append_times(rows):
     new = not TIMES_CSV.exists()
     with TIMES_CSV.open("a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, ["run", "photo", "width", "height", "seconds"])
+        w = csv.DictWriter(f, ["run", "photo", "width", "height", "seconds", "peak_mb"])
         if new:
             w.writeheader()
         w.writerows(rows)
@@ -64,13 +71,18 @@ def clean_run(run):
     src, dst = OUT / run, OUT / f"{run}-clean"
     dst.mkdir(parents=True, exist_ok=True)
     rows = []
-    for mask_path in sorted(src.glob("*.mask.png")):
+    def pixels(path):
+        with Image.open(path) as m:
+            return m.width * m.height
+
+    # Smallest first, so the ever-growing peak memory is each photo's own peak.
+    for mask_path in sorted(src.glob("*.mask.png"), key=pixels):
         stem = mask_path.name.removesuffix(".mask.png")
         photo = next((p for p in PHOTOS.glob(f"{stem}.*") if p.suffix.lower() in {".jpg", ".jpeg", ".png"}), None)
         if photo is None:
             continue
         image = load_rgb(photo)
-        alpha = np.asarray(Image.open(mask_path), np.float64) / 255.0
+        alpha = np.asarray(Image.open(mask_path), np.float32) / np.float32(255)
         fg, seconds = clean(image, alpha)
         to_img(compose(fg, alpha, (1, 1, 1))).save(dst / f"{stem}.white.jpg", quality=92)
         to_img(compose(fg, alpha, (0, 0, 0))).save(dst / f"{stem}.black.jpg", quality=92)
@@ -79,7 +91,7 @@ def clean_run(run):
         cut.save(dst / f"{stem}.cut.png", compress_level=1)
         shutil.copyfile(mask_path, dst / mask_path.name)
         rows.append({"run": run, "photo": photo.name, "width": image.shape[1],
-                     "height": image.shape[0], "seconds": round(seconds, 2)})
+                     "height": image.shape[0], "seconds": round(seconds, 2), "peak_mb": peak_mb()})
         print(f"  {run} {photo.name}: {seconds:.1f} s", flush=True)
     append_times(rows)
 
@@ -89,12 +101,13 @@ def time_sizes():
     rows = []
     for label, (w, h) in SIZES_MP.items():
         rng = np.random.default_rng(0)
-        image = rng.random((h, w, 3))
+        image = rng.random((h, w, 3), dtype=np.float32)
         blob = Image.new("L", (w, h), 0)
         ImageDraw.Draw(blob).ellipse((w * 0.25, h * 0.2, w * 0.75, h * 0.8), fill=255)
-        alpha = np.asarray(blob.filter(ImageFilter.GaussianBlur(12)), np.float64) / 255.0
+        alpha = np.asarray(blob.filter(ImageFilter.GaussianBlur(12)), np.float32) / np.float32(255)
         _, seconds = clean(image, alpha)
-        rows.append({"run": "timing", "photo": label, "width": w, "height": h, "seconds": round(seconds, 2)})
+        rows.append({"run": "timing", "photo": label, "width": w, "height": h,
+                     "seconds": round(seconds, 2), "peak_mb": peak_mb()})
         print(f"  {label} ({w}x{h}): {seconds:.1f} s", flush=True)
     append_times(rows)
 
