@@ -213,7 +213,7 @@
     </div>
     <section class="help" aria-label="Подсказка">
       <h2>Как оценивать</h2>
-      <p>Колонки A–D — разные модели, названия скрыты. Оценивайте, взяли бы вы вырезку в карточку товара.</p>
+      <p><span id="colRange">Колонки</span> — разные варианты, названия скрыты. Оценивайте, взяли бы вы вырезку в карточку товара.</p>
       <div class="scale">
         <i style="background:var(--r5)"></i><span><b>5</b> — беру как есть</span>
         <i style="background:var(--r4)"></i><span><b>4</b> — беру, мелочи не мешают</span>
@@ -722,6 +722,8 @@
 
   /* ---------- start ---------- */
 
+  $('colRange').textContent = COLS.length > 1
+    ? 'Колонки ' + COLS[0] + '–' + COLS[COLS.length - 1] : 'Колонка ' + COLS[0];
   buildPanels();
   buildStrip();
   setGround(ui.ground || 'white');
