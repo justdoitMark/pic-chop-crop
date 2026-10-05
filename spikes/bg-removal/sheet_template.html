@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Оценка вырезки фона</title>
+<style>
+  /* Neutral grey surround (as in ISO 12646 for judging images): the only
+     colour on the page is the rating scale, which carries meaning. */
+  :root {
+    --surround: #47484b;
+    --chrome: #2e2f31;
+    --chrome-2: #3a3b3e;
+    --line: #5a5b5f;
+    --ink: #ecebe8;
+    --ink-2: #a9aaad;
+    --r1: #c4472f; --r2: #d27a2e; --r3: #c7a12a; --r4: #6e9d4e; --r5: #2f8e69;
+    --checker: repeating-conic-gradient(#c9c9c9 0 25%, #f4f4f4 0 50%) 0 0 / 18px 18px;
+    --bar-h: 56px;
+    font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    font-size: 15px;
+    color: var(--ink);
+    background: var(--surround);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100dvh; display: flex; flex-direction: column; background: var(--surround); }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  /* Top bar */
+  .bar {
+    position: sticky; top: 0; z-index: 5;
+    min-height: var(--bar-h);
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px;
+    padding: 8px 16px;
+    background: var(--chrome);
+    border-bottom: 1px solid #252628;
+  }
+  .where { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+  .where strong { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .where span { color: var(--ink-2); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 26ch; }
+  .strip { display: flex; gap: 6px; flex-wrap: wrap; }
+  .strip button {
+    width: 34px; height: 34px; padding: 4px 4px 3px;
+    display: grid; grid-template-rows: 1fr auto; gap: 2px;
+    background: var(--chrome-2); border: 1px solid transparent; border-radius: 6px; cursor: pointer;
+  }
+  .strip button[aria-current="true"] { border-color: var(--ink); }
+  .strip .n { font-size: 12px; line-height: 1; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  .strip button[aria-current="true"] .n { color: var(--ink); }
+  .strip .ticks { display: flex; gap: 2px; }
+  .strip .ticks i { flex: 1; height: 5px; border-radius: 1px; background: #55565a; }
+  .grounds { display: flex; gap: 4px; margin-left: auto; }
+  .grounds button {
+    display: flex; align-items: center; gap: 6px;
+    height: 32px; padding: 0 10px;
+    background: transparent; border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+  }
+  .grounds button[aria-pressed="true"] { background: var(--chrome-2); border-color: var(--ink); }
+  .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #777; }
+  .done { display: flex; align-items: center; gap: 12px; }
+  #count { font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+  #count b { color: var(--ink); font-weight: 600; }
+  .primary {
+    height: 34px; padding: 0 14px; border-radius: 6px; cursor: pointer;
+    background: var(--ink); color: #1e1f21; border: 0; font-weight: 600;
+  }
+  .ghost { height: 34px; padding: 0 14px; border-radius: 6px; cursor: pointer; background: transparent; border: 1px solid var(--line); }
+
+  /* Stage: candidates in a grid, the original and help on the right */
+  .stage {
+    flex: 1; min-height: 0;
+    display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px;
+    padding: 12px;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 12px; min-height: 0; }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr; }
+  .grid.cols-2 { grid-template-rows: 1fr; }
+  .grid.cols-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+  .panel {
+    display: flex; flex-direction: column; min-height: 0;
+    background: var(--chrome); border-radius: 8px; overflow: hidden;
+    outline: 2px solid transparent; outline-offset: 0;
+  }
+  .panel.active { outline-color: var(--ink); }
+  .panel:focus-visible { outline-color: var(--ink); outline-offset: 0; }
+
+  .vp {
+    position: relative; flex: 1; min-height: 0; overflow: hidden;
+    cursor: grab; touch-action: none; user-select: none;
+  }
+  .vp.dragging { cursor: grabbing; }
+  .ground-white .vp.cut-vp { background: #fff; }
+  .ground-black .vp.cut-vp { background: #000; }
+  .ground-checker .vp.cut-vp { background: var(--checker); }
+  .ground-grey .vp.cut-vp { background: #808080; }
+  /* Each viewport is one canvas the size of the panel; only the visible
+     part of the photo is drawn into it (no photo-sized elements). */
+  .vp canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  .foot { display: flex; align-items: center; gap: 12px; padding: 8px 10px; background: var(--chrome); }
+  .letter {
+    flex: none; width: 36px; height: 36px; display: grid; place-items: center;
+    border-radius: 6px; font-size: 19px; font-weight: 600;
+    background: var(--chrome-2); color: var(--ink);
+  }
+  .rate { display: flex; gap: 4px; flex: 1; }
+  .rate button {
+    flex: 1; min-width: 0; height: 36px; padding: 0 6px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: var(--chrome-2); border: 1px solid transparent; border-radius: 6px; cursor: pointer;
+    transition: background-color .12s, transform .12s;
+  }
+  .rate button:hover { border-color: var(--line); }
+  .rate b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .rate span { color: var(--ink-2); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rate button[aria-checked="true"] { color: #fff; }
+  .rate button[aria-checked="true"] span { color: rgba(255, 255, 255, .9); }
+  .rate button[data-n="1"][aria-checked="true"] { background: var(--r1); }
+  .rate button[data-n="2"][aria-checked="true"] { background: var(--r2); }
+  .rate button[data-n="3"][aria-checked="true"] { background: var(--r3); color: #1e1f21; }
+  .rate button[data-n="3"][aria-checked="true"] span { color: rgba(30, 31, 33, .85); }
+  .rate button[data-n="4"][aria-checked="true"] { background: var(--r4); }
+  .rate button[data-n="5"][aria-checked="true"] { background: var(--r5); }
+  .rate button.just { transform: scale(1.06); }
+
+  .side { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .orig-panel { flex: 0 0 44%; display: flex; flex-direction: column; background: var(--chrome); border-radius: 8px; overflow: hidden; }
+  .orig-panel .vp { background: #2a2b2d; }
+  .orig-panel p { margin: 0; padding: 8px 10px; color: var(--ink-2); font-size: 13px; }
+  .zoom { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 2px; }
+  .zoom output { font-variant-numeric: tabular-nums; min-width: 7ch; }
+  .zoom button { height: 30px; padding: 0 10px; border-radius: 6px; cursor: pointer; background: transparent; border: 1px solid var(--line); }
+  .help { background: var(--chrome); border-radius: 8px; padding: 12px 14px; overflow: auto; font-size: 13.5px; line-height: 1.45; }
+  .help h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+  .help p { margin: 0 0 10px; color: var(--ink-2); }
+  .help dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; }
+  .help dt { white-space: nowrap; }
+  .help dd { margin: 0; color: var(--ink-2); }
+  kbd {
+    display: inline-block; min-width: 1.6em; padding: 0 5px; text-align: center;
+    border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px;
+    font-family: inherit; font-size: 12px; line-height: 1.6; color: var(--ink); background: var(--chrome-2);
+  }
+  .scale { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; margin: 0 0 12px; }
+  .scale i { width: 14px; height: 14px; border-radius: 3px; margin-top: 2px; }
+
+  /* Summary and export */
+  dialog {
+    width: min(560px, calc(100vw - 32px)); padding: 0; border: 0; border-radius: 10px;
+    background: var(--chrome); color: var(--ink);
+  }
+  dialog::backdrop { background: rgba(20, 20, 22, .6); }
+  .dlg { padding: 20px 22px; }
+  .dlg h2 { margin: 0 0 4px; font-size: 19px; font-weight: 600; }
+  .dlg > p { margin: 0 0 16px; color: var(--ink-2); }
+  .tally { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-variant-numeric: tabular-nums; }
+  .tally th, .tally td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--chrome-2); font-weight: 400; }
+  .tally th { color: var(--ink-2); font-size: 13px; }
+  .tally td:first-child { font-weight: 600; }
+  .pass { color: #8fcf9f; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .note { color: var(--ink-2); font-size: 13px; margin: 12px 0 0; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+  textarea { width: 100%; height: 7em; margin-top: 8px; font: 12px/1.4 Consolas, monospace; background: #232426; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; }
+
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  @media (max-width: 1100px) {
+    body { height: auto; }
+    .stage { grid-template-columns: 1fr; }
+    .side { flex-direction: row; flex-wrap: wrap; }
+    .orig-panel { flex: 1 1 260px; height: 300px; }
+    .help { flex: 1 1 260px; }
+    .zoom { flex: 1 1 100%; }
+    .grid, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; grid-template-rows: none; }
+    .panel { height: 70vh; }
+    .rate span { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rate button { transition: none; }
+    .rate button.just { transform: none; }
+  }
+</style>
+</head>
+<body class="ground-white">
+<header class="bar">
+  <div class="where"><strong id="photoNo">Фото 1 из 10</strong><span id="photoName"></span></div>
+  <nav class="strip" id="strip" aria-label="Фото"></nav>
+  <div class="grounds" role="group" aria-label="Фон под вырезкой">
+    <button data-ground="white" aria-pressed="true"><span class="swatch" style="background:#fff"></span>Белый</button>
+    <button data-ground="black" aria-pressed="false"><span class="swatch" style="background:#000"></span>Чёрный</button>
+    <button data-ground="checker" aria-pressed="false"><span class="swatch" style="background:var(--checker)"></span>Шахматка</button>
+    <button data-ground="grey" aria-pressed="false"><span class="swatch" style="background:#808080"></span>Серый</button>
+  </div>
+  <div class="done"><span id="count"></span><button class="primary" id="openSave">Сохранить оценки</button></div>
+</header>
+
+<main class="stage">
+  <section class="grid" id="grid" aria-label="Варианты вырезки"></section>
+  <aside class="side">
+    <figure class="orig-panel" style="margin:0">
+      <div class="vp" id="origVp"><canvas role="img" aria-label="Оригинал"></canvas></div>
+      <p>Оригинал. Масштаб и сдвиг — общие для всех панелей.</p>
+    </figure>
+    <div class="zoom">
+      <output id="zoomOut">Вписано</output>
+      <span id="zoomNote" class="note" style="margin:0" role="status"></span>
+      <button id="zoom1">1:1 на краю</button>
+      <button id="zoomFit">Вписать</button>
+    </div>
+    <section class="help" aria-label="Подсказка">
+      <h2>Как оценивать</h2>
+      <p>Колонки A–D — разные модели, названия скрыты. Оценивайте, взяли бы вы вырезку в карточку товара.</p>
+      <div class="scale">
+        <i style="background:var(--r5)"></i><span><b>5</b> — беру как есть</span>
+        <i style="background:var(--r4)"></i><span><b>4</b> — беру, мелочи не мешают</span>
+        <i style="background:var(--r3)"></i><span><b>3</b> — нужна ручная правка</span>
+        <i style="background:var(--r2)"></i><span><b>2</b> — плохо</span>
+        <i style="background:var(--r1)"></i><span><b>1</b> — не тот объект или мусор</span>
+      </div>
+      <dl>
+        <dt><kbd>1</kbd>–<kbd>5</kbd></dt><dd>оценить выбранную панель</dd>
+        <dt><kbd>Tab</kbd></dt><dd>следующая панель</dd>
+        <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>другое фото</dd>
+        <dt>Колесо</dt><dd>масштаб во всех панелях</dd>
+        <dt>Тянуть</dt><dd>сдвиг во всех панелях</dd>
+        <dt>Двойной клик</dt><dd>1:1 в этой точке или вписать</dd>
+        <dt><kbd>Z</kbd></dt><dd>1:1 на краю предмета или вписать</dd>
+        <dt><kbd>W</kbd> <kbd>B</kbd> <kbd>C</kbd> <kbd>G</kbd></dt><dd>фон: белый, чёрный, шахматка, серый</dd>
+        <dt>Держать <kbd>O</kbd></dt><dd>оригинал вместо вырезки</dd>
+      </dl>
+    </section>
+  </aside>
+</main>
+
+<dialog id="saveDlg" aria-labelledby="saveTitle">
+  <div class="dlg">
+    <h2 id="saveTitle">Оценки</h2>
+    <p id="saveLead"></p>
+    <table class="tally" id="tally"></table>
+    <div class="actions">
+      <button class="primary" id="download">Сохранить ratings.json</button>
+      <button class="ghost" id="copy">Скопировать текст</button>
+      <button class="ghost" id="closeDlg">Вернуться к оценке</button>
+      <span id="copied" class="note" role="status" style="margin:0"></span>
+    </div>
+    <p class="note">Файл попадёт в «Загрузки» — оттуда его заберут. Названия моделей записаны внутри файла.</p>
+    <details>
+      <summary>Показать текст (в нём видны названия моделей)</summary>
+      <textarea id="json" readonly></textarea>
+    </details>
+  </div>
+</dialog>
+
+<p class="sr" id="live" aria-live="polite"></p>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(function () {
+  'use strict';
+  var DATA = JSON.parse(document.getElementById('data').textContent);
+  var COLS = DATA.columns;
+  var PHOTOS = DATA.photos;
+  var STORE = DATA.store;
+  var UI_STORE = STORE + '-ui';
+  var LABELS = { 1: 'мусор', 2: 'плохо', 3: 'править', 4: 'беру', 5: 'как есть' };
+  var SCALE_COLORS = { 1: 'var(--r1)', 2: 'var(--r2)', 3: 'var(--r3)', 4: 'var(--r4)', 5: 'var(--r5)' };
+  var MAX_ZOOM = 8;
+  var WHEEL_STEP = 1.15;
+  var NEXT_PHOTO_DELAY_MS = 450;
+
+  function load(key, fallback) {
+    try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (e) { return fallback; }
+  }
+  function save(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private window: works without saving */ }
+  }
+
+  var ratings = load(STORE, {});
+  var ui = load(UI_STORE, { photo: 0, ground: 'white' });
+  var current = Math.min(Math.max(ui.photo | 0, 0), PHOTOS.length - 1);
+  var active = 0;
+  var view = { fit: true, s: 1, x: 0, y: 0 };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var grid = $('grid'), strip = $('strip'), origVp = $('origVp');
+  var live = $('live');
+
+  function keyOf(pi, col) { return PHOTOS[pi].name + '|' + col; }
+  function ratingOf(pi, col) { return ratings[keyOf(pi, col)] || 0; }
+  function cellsOf(pi) { return COLS.filter(function (c) { return PHOTOS[pi].cells[c]; }); }
+  function totalCells() { return PHOTOS.reduce(function (n, p, i) { return n + cellsOf(i).length; }, 0); }
+  function ratedCells() {
+    return PHOTOS.reduce(function (n, p, i) {
+      return n + cellsOf(i).filter(function (c) { return ratingOf(i, c); }).length;
+    }, 0);
+  }
+
+  /* ---------- building the panels ---------- */
+
+  // panel: { col, el, vp, canvas, letter, buttons, cut: Source }
+  // Source: { img: best loaded image so far, full: '' | 'loading' | 'yes' | 'failed', photo }
+  var panels = [];
+  var origSource = null;  // one original per photo, shared by every viewport
+  var peek = false;
+
+  function makeSource(url, pi) {
+    var src = { img: new Image(), full: '', photo: pi };
+    src.img.decoding = 'async';
+    src.img.onload = scheduleRender;
+    src.img.src = url;
+    return src;
+  }
+
+  function makeCanvas(label) {
+    var c = document.createElement('canvas');
+    c.setAttribute('role', 'img'); c.setAttribute('aria-label', label);
+    return c;
+  }
+
+  function buildPanels() {
+    grid.className = 'grid' + (COLS.length === 3 ? ' cols-3' : COLS.length === 2 ? ' cols-2' : COLS.length === 1 ? ' cols-1' : '');
+    COLS.forEach(function (col, i) {
+      var el = document.createElement('article');
+      el.className = 'panel'; el.tabIndex = 0;
+      el.setAttribute('aria-label', 'Вариант ' + col);
+      var vp = document.createElement('div'); vp.className = 'vp cut-vp';
+      var canvas = makeCanvas('Вырезка, вариант ' + col);
+      vp.appendChild(canvas);
+      var foot = document.createElement('div'); foot.className = 'foot';
+      var letter = document.createElement('span'); letter.className = 'letter'; letter.textContent = col;
+      var rate = document.createElement('div'); rate.className = 'rate';
+      rate.setAttribute('role', 'radiogroup'); rate.setAttribute('aria-label', 'Оценка варианта ' + col);
+      var buttons = [];
+      for (var n = 1; n <= 5; n++) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.dataset.n = n; b.tabIndex = -1;
+        b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', 'false');
+        b.innerHTML = '<b>' + n + '</b><span>' + LABELS[n] + '</span>';
+        b.title = n + ' — ' + LABELS[n];
+        rate.appendChild(b); buttons.push(b);
+      }
+      foot.appendChild(letter); foot.appendChild(rate);
+      el.appendChild(vp); el.appendChild(foot);
+      grid.appendChild(el);
+      var panel = { col: col, el: el, vp: vp, canvas: canvas, letter: letter, buttons: buttons, cut: null };
+      panels.push(panel);
+
+      el.addEventListener('focus', function () { setActive(i); });
+      el.addEventListener('pointerdown', function () { setActive(i); });
+      rate.addEventListener('click', function (e) {
+        var btn = e.target.closest('button');
+        if (btn) rate_(i, +btn.dataset.n);
+      });
+      wireViewport(vp);
+    });
+    wireViewport(origVp);
+  }
+
+  function buildStrip() {
+    PHOTOS.forEach(function (p, pi) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.innerHTML = '<span class="n">' + (pi + 1) + '</span><span class="ticks">' +
+        cellsOf(pi).map(function () { return '<i></i>'; }).join('') + '</span>';
+      b.addEventListener('click', function () { show(pi); });
+      strip.appendChild(b);
+    });
+  }
+
+  /* ---------- showing a photo ---------- */
+
+  function show(pi, focusFirstUnrated) {
+    current = pi;
+    view = { fit: true, s: 1, x: PHOTOS[pi].w / 2, y: PHOTOS[pi].h / 2 };
+    var photo = PHOTOS[pi];
+    panels.forEach(function (panel) {
+      var cell = photo.cells[panel.col];
+      panel.el.hidden = !cell;
+      panel.cut = cell ? makeSource(cell.p, pi) : null;
+    });
+    origSource = makeSource(photo.orig.p, pi);
+    $('zoomNote').textContent = '';
+    $('photoNo').textContent = 'Фото ' + (pi + 1) + ' из ' + PHOTOS.length;
+    $('photoName').textContent = photo.name;
+    $('photoName').title = photo.name;
+    ui.photo = pi; save(UI_STORE, ui);
+    var target = 0;
+    if (focusFirstUnrated) {
+      var unrated = panels.findIndex(function (p) { return !p.el.hidden && !ratingOf(pi, p.col); });
+      target = unrated < 0 ? 0 : unrated;
+    }
+    setActive(target, true);
+    refresh();
+    render();
+    preloadNext(pi);
+  }
+
+  function preloadNext(pi) {
+    var next = PHOTOS[(pi + 1) % PHOTOS.length];
+    COLS.forEach(function (c) { if (next.cells[c]) new Image().src = next.cells[c].p; });
+    new Image().src = next.orig.p;
+  }
+
+  function setActive(i, focus) {
+    active = i;
+    panels.forEach(function (p, j) { p.el.classList.toggle('active', j === i); });
+    if (focus && panels[i]) panels[i].el.focus({ preventScroll: true });
+  }
+
+  /* ---------- rating ---------- */
+
+  function rate_(i, n) {
+    var panel = panels[i];
+    if (!panel || panel.el.hidden) return;
+    var wasRated = !!ratingOf(current, panel.col);
+    ratings[keyOf(current, panel.col)] = n;
+    save(STORE, ratings);
+    var btn = panel.buttons[n - 1];
+    btn.classList.add('just');
+    setTimeout(function () { btn.classList.remove('just'); }, 140);
+    live.textContent = 'Вариант ' + panel.col + ': ' + n + ', ' + LABELS[n];
+    refresh();
+    if (wasRated) return;  // changing a rating does not move on
+    var nextIdx = panels.findIndex(function (p, j) {
+      return j > i && !p.el.hidden && !ratingOf(current, p.col);
+    });
+    if (nextIdx < 0) nextIdx = panels.findIndex(function (p) { return !p.el.hidden && !ratingOf(current, p.col); });
+    if (nextIdx >= 0) { setActive(nextIdx, true); return; }
+    var nextPhoto = nextUnratedPhoto(current);
+    if (nextPhoto < 0) { setTimeout(openSave, NEXT_PHOTO_DELAY_MS); return; }
+    setTimeout(function () { show(nextPhoto, true); }, NEXT_PHOTO_DELAY_MS);
+  }
+
+  function nextUnratedPhoto(from) {
+    for (var k = 1; k <= PHOTOS.length; k++) {
+      var pi = (from + k) % PHOTOS.length;
+      if (cellsOf(pi).some(function (c) { return !ratingOf(pi, c); })) return pi;
+    }
+    return -1;
+  }
+
+  function refresh() {
+    panels.forEach(function (panel) {
+      var r = ratingOf(current, panel.col);
+      panel.buttons.forEach(function (b, k) { b.setAttribute('aria-checked', String(k + 1 === r)); });
+      panel.letter.style.background = r ? SCALE_COLORS[r] : '';
+      panel.letter.style.color = r ? (r === 3 ? '#1e1f21' : '#fff') : '';
+    });
+    Array.prototype.forEach.call(strip.children, function (b, pi) {
+      b.setAttribute('aria-current', String(pi === current));
+      var cols = cellsOf(pi);
+      var done = cols.filter(function (c) { return ratingOf(pi, c); }).length;
+      b.setAttribute('aria-label', 'Фото ' + (pi + 1) + ': оценено ' + done + ' из ' + cols.length);
+      Array.prototype.forEach.call(b.querySelectorAll('i'), function (tick, k) {
+        var r = ratingOf(pi, cols[k]);
+        tick.style.background = r ? SCALE_COLORS[r] : '';
+      });
+    });
+    $('count').innerHTML = 'Оценено <b>' + ratedCells() + '</b> из ' + totalCells();
+  }
+
+  /* ---------- shared zoom and pan ---------- */
+
+  function fitScale(vp) {
+    var p = PHOTOS[current];
+    return Math.min(vp.clientWidth / p.w, vp.clientHeight / p.h);
+  }
+
+  function mainFit() { return panels[0] ? fitScale(panels[0].vp) : fitScale(origVp); }
+
+  var renderQueued = false;
+  function scheduleRender() {
+    if (renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(function () { renderQueued = false; render(); });
+  }
+
+  function render() {
+    panels.forEach(function (panel) {
+      if (!panel.el.hidden) draw(panel.vp, panel.canvas, peek ? origSource : panel.cut);
+    });
+    draw(origVp, origVp.querySelector('canvas'), origSource);
+    $('zoomOut').textContent = view.fit ? 'Вписано' : Math.round(view.s * 100) + ' %';
+    if (!view.fit) loadFull();
+  }
+
+  // Draw the visible part of the photo into a panel-sized canvas.
+  function draw(vp, canvas, src) {
+    var p = PHOTOS[current];
+    var dpr = window.devicePixelRatio || 1;
+    var cw = vp.clientWidth, ch = vp.clientHeight;
+    var bw = Math.max(1, Math.round(cw * dpr)), bh = Math.max(1, Math.round(ch * dpr));
+    if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
+    var s = view.fit ? fitScale(vp) : view.s;
+    var cx = view.fit ? p.w / 2 : view.x, cy = view.fit ? p.h / 2 : view.y;
+    vp.dataset.scale = s.toFixed(6);
+    vp.dataset.center = Math.round(cx) + ',' + Math.round(cy);
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, bw, bh);
+    if (!src || src.photo !== current || !src.img.complete || !src.img.naturalWidth) return;
+    vp.dataset.full = src.full;
+    vp.dataset.natural = src.img.naturalWidth;
+    // Visible rectangle in photo pixels, clipped to the photo.
+    var x0 = cx - cw / 2 / s, y0 = cy - ch / 2 / s;
+    var vx0 = Math.max(0, x0), vy0 = Math.max(0, y0);
+    var vx1 = Math.min(p.w, cx + cw / 2 / s), vy1 = Math.min(p.h, cy + ch / 2 / s);
+    if (vx1 <= vx0 || vy1 <= vy0) return;
+    var kx = src.img.naturalWidth / p.w, ky = src.img.naturalHeight / p.h;
+    ctx.imageSmoothingEnabled = s < 2;  // at 200 % and up show real pixels
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src.img,
+      vx0 * kx, vy0 * ky, (vx1 - vx0) * kx, (vy1 - vy0) * ky,
+      (vx0 - x0) * s * dpr, (vy0 - y0) * s * dpr, (vx1 - vx0) * s * dpr, (vy1 - vy0) * s * dpr);
+  }
+
+  function loadFull() {
+    // Previews are 1600 px; past that scale the full image is sharper.
+    var p = PHOTOS[current];
+    var previewScale = Math.min(1, 1600 / Math.max(p.w, p.h));
+    if (view.s <= previewScale * 1.05) return;
+    panels.forEach(function (panel) {
+      if (panel.cut) upgrade(panel.cut, p.cells[panel.col].full);
+    });
+    upgrade(origSource, p.orig.full);
+  }
+
+  function upgrade(src, url) {
+    if (src.full) return;
+    src.full = 'loading';
+    updateNote();
+    var full = new Image();
+    full.decoding = 'async';
+    full.onload = function () {
+      src.img = full; src.full = 'yes';
+      updateNote(); scheduleRender();
+    };
+    full.onerror = function () { src.full = 'failed'; updateNote(); };
+    full.src = url;
+  }
+
+  function updateNote() {
+    var sources = panels.map(function (p) { return p.cut; }).concat([origSource]).filter(Boolean);
+    var note = '';
+    if (sources.some(function (s) { return s.full === 'loading'; })) note = 'Загружаю полное разрешение…';
+    else if (sources.some(function (s) { return s.full === 'failed'; })) note = 'Полное разрешение не загрузилось — показано превью';
+    $('zoomNote').textContent = note;
+  }
+
+  function clampView() {
+    var p = PHOTOS[current];
+    view.x = Math.min(Math.max(view.x, 0), p.w);
+    view.y = Math.min(Math.max(view.y, 0), p.h);
+  }
+
+  function pointToImage(vp, clientX, clientY) {
+    var r = vp.getBoundingClientRect();
+    var s = view.fit ? fitScale(vp) : view.s;
+    var p = PHOTOS[current];
+    var cx = view.fit ? p.w / 2 : view.x, cy = view.fit ? p.h / 2 : view.y;
+    return { x: cx + (clientX - r.left - r.width / 2) / s, y: cy + (clientY - r.top - r.height / 2) / s, s: s, r: r };
+  }
+
+  function zoomAt(vp, clientX, clientY, newScale) {
+    var pt = pointToImage(vp, clientX, clientY);
+    // One shared threshold: the candidates' fit, whichever panel is scrolled.
+    if (newScale <= mainFit() * 1.001) { view.fit = true; render(); return; }
+    newScale = Math.min(newScale, MAX_ZOOM);
+    // keep the image point under the cursor in place
+    view.fit = false;
+    view.s = newScale;
+    view.x = pt.x - (clientX - pt.r.left - pt.r.width / 2) / newScale;
+    view.y = pt.y - (clientY - pt.r.top - pt.r.height / 2) / newScale;
+    clampView(); render();
+  }
+
+  function zoomOneToOne(clientX, clientY, vp) {
+    var p = PHOTOS[current];
+    if (vp) {
+      var pt = pointToImage(vp, clientX, clientY);
+      view.x = pt.x; view.y = pt.y;
+    } else {
+      view.x = p.edge[0] * p.w; view.y = p.edge[1] * p.h;
+    }
+    view.fit = false; view.s = 1; clampView(); render();
+  }
+
+  function wireViewport(vp) {
+    vp.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var s = view.fit ? mainFit() : view.s;
+      zoomAt(vp, e.clientX, e.clientY, e.deltaY < 0 ? s * WHEEL_STEP : s / WHEEL_STEP);
+    }, { passive: false });
+    vp.addEventListener('dblclick', function (e) {
+      if (view.fit || view.s < 1) zoomOneToOne(e.clientX, e.clientY, vp);
+      else { view.fit = true; render(); }
+    });
+    var drag = null;
+    vp.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      if (view.fit) { drag = null; return; }
+      drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+      vp.setPointerCapture(e.pointerId);
+      vp.classList.add('dragging');
+    });
+    vp.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      view.x = drag.vx - (e.clientX - drag.x) / view.s;
+      view.y = drag.vy - (e.clientY - drag.y) / view.s;
+      clampView(); render();
+    });
+    function end() { drag = null; vp.classList.remove('dragging'); }
+    vp.addEventListener('pointerup', end);
+    vp.addEventListener('pointercancel', end);
+  }
+
+  // Panels change size with the window and with the layout breakpoint.
+  if (window.ResizeObserver) new ResizeObserver(scheduleRender).observe(document.querySelector('.stage'));
+  window.addEventListener('resize', scheduleRender);
+
+  /* ---------- background and peek ---------- */
+
+  function setGround(g) {
+    ui.ground = g; save(UI_STORE, ui);
+    document.body.className = document.body.className.replace(/\bground-\S+/g, '').trim() + ' ground-' + g;
+    Array.prototype.forEach.call(document.querySelectorAll('.grounds button'), function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.ground === g));
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.grounds button'), function (b) {
+    b.addEventListener('click', function () { setGround(b.dataset.ground); });
+  });
+
+  function setPeek(on) {
+    if (peek === on) return;
+    peek = on;
+    document.body.classList.toggle('peek', on);
+    scheduleRender();
+  }
+
+  /* ---------- keyboard ---------- */
+
+  var GROUND_KEYS = { KeyW: 'white', KeyB: 'black', KeyC: 'checker', KeyG: 'grey' };
+
+  document.addEventListener('keydown', function (e) {
+    if ($('saveDlg').open || e.ctrlKey || e.metaKey || e.altKey) return;
+    var digit = /^(Digit|Numpad)([1-5])$/.exec(e.code);
+    if (digit) { rate_(active, +digit[2]); e.preventDefault(); return; }
+    if (GROUND_KEYS[e.code]) { setGround(GROUND_KEYS[e.code]); return; }
+    switch (e.code) {
+      case 'ArrowRight': show((current + 1) % PHOTOS.length, true); e.preventDefault(); break;
+      case 'ArrowLeft': show((current - 1 + PHOTOS.length) % PHOTOS.length, true); e.preventDefault(); break;
+      case 'KeyZ':
+        if (view.fit) zoomOneToOne(); else { view.fit = true; render(); }
+        break;
+      case 'Digit0': case 'Escape': view.fit = true; render(); break;
+      case 'KeyO': setPeek(true); break;
+      case 'Tab': {
+        // Cycle panels only from inside the grid; elsewhere Tab moves as usual.
+        if (!grid.contains(document.activeElement)) return;
+        e.preventDefault();
+        var step = e.shiftKey ? -1 : 1, i = active;
+        do { i = (i + step + panels.length) % panels.length; } while (panels[i].el.hidden);
+        setActive(i, true);
+        break;
+      }
+    }
+  });
+  document.addEventListener('keyup', function (e) { if (e.code === 'KeyO') setPeek(false); });
+  window.addEventListener('blur', function () { setPeek(false); });
+
+  $('zoom1').addEventListener('click', function () { zoomOneToOne(); });
+  $('zoomFit').addEventListener('click', function () { view.fit = true; render(); });
+
+  /* ---------- summary and export ---------- */
+
+  function exportText() { return JSON.stringify({ key: DATA.key, ratings: ratings }, null, 1); }
+
+  function openSave() {
+    var rated = ratedCells(), total = totalCells();
+    $('saveLead').textContent = rated === total
+      ? 'Все ' + total + ' оценок готовы. Сохраните файл.'
+      : 'Оценено ' + rated + ' из ' + total + '. Можно сохранить и сейчас, а потом продолжить.';
+    var rows = '<tr><th>Вариант</th><th>Фото на 4–5</th><th>Оценено</th><th>Средняя</th></tr>';
+    COLS.forEach(function (c) {
+      var vals = PHOTOS.map(function (p, pi) { return ratingOf(pi, c); }).filter(Boolean);
+      var good = vals.filter(function (v) { return v >= 4; }).length;
+      var avg = vals.length ? (vals.reduce(function (a, b) { return a + b; }, 0) / vals.length).toFixed(1).replace('.', ',') : '—';
+      var photosWith = PHOTOS.filter(function (p) { return p.cells[c]; }).length;
+      rows += '<tr><td>' + c + '</td><td class="' + (good >= 7 ? 'pass' : '') + '">' + good + ' из ' + photosWith +
+        '</td><td>' + vals.length + '</td><td>' + avg + '</td></tr>';
+    });
+    $('tally').innerHTML = rows;
+    $('json').value = exportText();
+    $('copied').textContent = '';
+    $('saveDlg').showModal();
+  }
+  $('openSave').addEventListener('click', openSave);
+  $('closeDlg').addEventListener('click', function () { $('saveDlg').close(); });
+  $('download').addEventListener('click', function () {
+    var blob = new Blob([exportText()], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'ratings' + STORE.replace('pcc-bg-ratings', '') + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    $('copied').textContent = 'Файл сохранён в «Загрузки».';
+  });
+  $('copy').addEventListener('click', function () {
+    var text = exportText();
+    var done = function () { $('copied').textContent = 'Текст скопирован.'; };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(); });
+    } else fallbackCopy();
+    function fallbackCopy() {
+      var ta = $('json'); ta.closest('details').open = true; ta.select();
+      $('copied').textContent = document.execCommand('copy') ? 'Текст скопирован.' : 'Выделите текст ниже и скопируйте.';
+    }
+  });
+
+  /* ---------- start ---------- */
+
+  buildPanels();
+  buildStrip();
+  setGround(ui.ground || 'white');
+  show(current, true);
+})();
+</script>
+</body>
+</html>
