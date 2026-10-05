@@ -31,9 +31,15 @@ python -m venv .venv
 powershell -File gpu_mem.ps1 -Seconds 1800      # in a second window: GPU memory per python process
 
 .\.venv\Scripts\python clean.py --time                          # edge clean-up timing, 12 / 24 MP
-.\.venv\Scripts\python clean.py <run> <run>                     # e.g. birefnet_lite-fp16-dml
-.\.venv\Scripts\python sheet.py --columns <run> <run>-clean ... # -> out/sheet.html
+.\.venv\Scripts\python clean.py <run> <run>                     # e.g. birefnet-fp32-cpu -> out/<run>-clean/
+.\.venv\Scripts\python sheet.py --columns <run> <run> ...       # -> out/sheet.html (blind rating, one photo per screen)
+.\.venv\Scripts\python sheet.py --name clean --columns <run>-clean ...   # -> out/sheet-clean.html, own ratings store
+.\.venv\Scripts\python tally.py out\ratings.json out\ratings-clean.json  # Markdown tables for RESULTS.md
 ```
+
+The sheet page is `sheet_template.html`; ratings stay in the browser
+(localStorage) until "Сохранить оценки" writes `ratings*.json` to Downloads.
+Keep the same `--columns` order to keep the same letters.
 
 `bench.py` runs each model × precision × provider in its own process (clean
 peak memory and first-load time) with a 10-minute limit, and appends rows to
@@ -50,13 +56,14 @@ $env:PATH = "C:\ClaudeUser\mingw64\bin;$env:PATH"    # wherever WinLibs lives
 $env:CARGO_TARGET_DIR = "C:\pcc-target"
 cargo build --release --manifest-path rs\Cargo.toml
 Copy-Item dll\*.dll C:\pcc-target\release\    # DirectML.dll must sit next to the exe
-C:\pcc-target\release\bg-remove-rs.exe models\<key>\onnx\<file>.onnx photos\<photo> out\rs\<photo>.mask.png [--cpu]
+C:\pcc-target\release\bg-remove-rs.exe models\<key>\onnx\<file>.onnx photos\<photo> out\rs\<photo>.mask.png [--cpu [--no-arena]]
 .\.venv\Scripts\python compare.py out\rs <run>                 # share of pixels off by > 8/255
 powershell -File ab_time.ps1 -Model isnet -Provider dml        # Rust vs Python, alternating rounds
 ```
 
 The first DirectML session of a new exe compiles shaders (~1 min on Iris Xe);
-time the second run.
+time the second run. BiRefNet on CPU needs `--no-arena` (no arena, no memory
+pattern) to fit a 16 GB laptop.
 
 `dll/` holds `onnxruntime.dll` from NuGet `Microsoft.ML.OnnxRuntime.DirectML` 1.24.4
 and `DirectML.dll` from `Microsoft.AI.DirectML` 1.15.4 (`bin/x64-win`).
