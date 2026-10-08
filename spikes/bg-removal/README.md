@@ -67,3 +67,24 @@ pattern) to fit a 16 GB laptop.
 
 `dll/` holds `onnxruntime.dll` from NuGet `Microsoft.ML.OnnxRuntime.DirectML` 1.24.4
 and `DirectML.dll` from `Microsoft.AI.DirectML` 1.15.4 (`bin/x64-win`).
+
+With the MSVC toolchain (VS Build Tools) the same `cargo build` works without
+WinLibs; only `CARGO_TARGET_DIR` and the DLL copy are needed.
+
+## Stage E (RTX PC): extra checks in `stage_e/`
+
+```powershell
+# BiRefNet on DirectML with/without DML graph fusion (fp32 fails with it on the RTX 5090)
+.\.venv\Scripts\python stage_e\dml_session.py fusion|nofusion|basic [model_fp16.onnx]
+.\.venv\Scripts\python stage_e\bench_nofusion.py fp32      # -> out\nofusion\, then compare.py out\nofusion\birefnet-fp32-dml birefnet-fp32-cpu
+
+# Real-ESRGAN ncnn-vulkan (unzip the 20220424 Windows release into ncnn\app\, git-ignored)
+.\.venv\Scripts\python stage_e\sr_tools.py crop photos\<photo> out\birefnet-fp16-dml\<stem>.mask.png out\ncnn\in\<stem>.png
+ncnn\app\realesrgan-ncnn-vulkan.exe -i out\ncnn\in -o out\ncnn\x4 -n realesrgan-x4plus -m ncnn\app\models   # tile <= 768: one huge tile resets the driver
+.\.venv\Scripts\python stage_e\sr_tools.py check|seams ...
+
+# IC-Light through a local ComfyUI (outside the repo, --listen 127.0.0.1 --offline)
+.\.venv\Scripts\python stage_e\iclight_run.py prep out\birefnet-fp16-dml\<stem>.cut.png out\iclight\fg
+.\.venv\Scripts\python stage_e\iclight_run.py run <stem>_fg.png <prefix> --prompt "..." --input-dir <ComfyUI\input>
+.\.venv\Scripts\python stage_e\iclight_sheet.py <fg.png> <raw.png> <detail.png> out\iclight\sheets\<name>.png
+```
