@@ -431,6 +431,8 @@ BiRefNet fp16, DML, 3 фото. DLL загружены из папки exe (`Get
   - на Iris Xe, скорее всего, работать не будет (UNet 1,7 ГБ, риск TDR) — это функция для дискретных GPU (вывод, не проверено).
 - **Лицензия весов IC-Light.** Тега у репозитория на HF нет; строка `license: creativeml-openrail-m` стоит в конце README. Код — Apache-2.0, база RV5.1 — OpenRAIL-M (с ограничениями использования). Уточнить до раздачи.
 
+**Итог после просмотра пользователем (2026-10-08):** все варианты V0–V6 на фото №6 и №8 — плохо. Нейросеть выдумывает и искажает сам предмет, а не только текст. Маска защищает только найденные надписи, а остальное IC-Light перерисовывает почти с нуля (denoise 0,9): отсюда и «красивый свет», и выдуманные детали. Метрики текста и синтетический флакон этого не показали. **Решение: AI-переосвещение не делаем.** Если понадобится «студийный вид», его делать без нейросети: уровни и баланс белого, мягкий градиент света по маске, тень, ровный фон.
+
 Источники: [IC-Light, статья ICLR 2025](https://proceedings.iclr.cc/paper_files/paper/2025/file/1cce374fec7829c24a97ae0e91cd0999-Paper-Conference.pdf) · [TokBench](https://arxiv.org/html/2505.18142v2) · [IC-Light gradio_demo.py](https://github.com/lllyasviel/IC-Light/blob/main/gradio_demo.py) · [обсуждение IC-Light V2](https://github.com/lllyasviel/IC-Light/discussions/98) · [ComfyUI-productfix](https://github.com/MiddleKD/ComfyUI-productfix) · [ComfyUI-IC-Light-Native](https://github.com/huchenlei/ComfyUI-IC-Light-Native) · [sd-forge-ic-light](https://github.com/Haoming02/sd-forge-ic-light) · [Consistency Decoder](https://github.com/openai/consistencydecoder) · [LBM relighting](https://huggingface.co/jasperai/LBM_relighting) · [Qwen-Image-Edit-2511](https://huggingface.co/Qwen/Qwen-Image-Edit-2511) · [PP-OCRv4 det ONNX (RapidOCR)](https://huggingface.co/SWHL/RapidOCR) · [ic-light-android (ONNX)](https://huggingface.co/xay2001/ic-light-android) · [ORT DirectML EP](https://onnxruntime.ai/docs/execution-providers/DirectML-ExecutionProvider.html).
 
 ### Отступления от плана (этап E)
@@ -491,7 +493,7 @@ BiRefNet fp16, DML, 3 фото. DLL загружены из папки exe (`Get
   - На GPU — только fp16: fp32 падает при слиянии графа DML.
   - Сессию держать только на время работы: BiRefNet fp16 занимает 10,3 ГБ видеопамяти и ~13 ГБ commit, а приложение висит в фоне.
   - Не проверено, что будет на видеокарте с 6–8 ГБ.
-- **IC-Light:** вид пользователю нравится; текст чинится (1536 px + перенос деталей по маске текста, раздел «IC-Light: можно ли сохранить текст»). Открыто: меняет цвет товара; нужен свой конвейер SD на `ort` и загрузка ~2,1 ГБ; лицензия весов. Возможная галочка «профессиональный свет» — для дискретных GPU, после 0.3.0.
+- **IC-Light и AI-переосвещение вообще:** не делаем (2026-10-08, после просмотра всех вариантов пользователем). Модель перерисовывает предмет и выдумывает детали; маска текста спасает только надписи (раздел «IC-Light: можно ли сохранить текст»). «Студийный вид», если понадобится, — без нейросети.
 
 ## Что дальше
 
