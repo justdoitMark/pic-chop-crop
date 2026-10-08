@@ -87,4 +87,10 @@ ncnn\app\realesrgan-ncnn-vulkan.exe -i out\ncnn\in -o out\ncnn\x4 -n realesrgan-
 .\.venv\Scripts\python stage_e\iclight_run.py prep out\birefnet-fp16-dml\<stem>.cut.png out\iclight\fg
 .\.venv\Scripts\python stage_e\iclight_run.py run <stem>_fg.png <prefix> --prompt "..." --input-dir <ComfyUI\input>
 .\.venv\Scripts\python stage_e\iclight_sheet.py <fg.png> <raw.png> <detail.png> out\iclight\sheets\<name>.png
+
+# Keeping text under IC-Light: variants V0-V6, OCR / text-detail scores, sheets -> out\relight\<tag>\
+# text mask: PP-OCRv4 det ONNX in models\ppocr\ (SWHL/RapidOCR on Hugging Face, Apache-2.0)
+.\.venv\Scripts\python stage_e\relight_exp.py <cut.png> <tag> --prompt "..."
+.\.venv\Scripts\python stage_e\textdet.py <image> [mask.png]
+powershell -ExecutionPolicy Bypass -File stage_e\ocr.ps1 -Image <image> -Out <json>   # Windows OCR, offline
 ```
